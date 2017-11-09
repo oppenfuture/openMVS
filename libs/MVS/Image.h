@@ -82,6 +82,7 @@ public:
 	Camera camera; // view's pose
 	uint32_t width, height; // image size
 	Image8U3 image; // image color pixels
+	Image32F mask; // image mask
 	ViewScoreArr neighbors; // score&store the neighbor images
 	float scale; // image scale relative to the original size
 	float avgDepth; // average depth of the points seen by this camera
@@ -103,6 +104,7 @@ public:
 	static bool ReadImage(IMAGEPTR pImage, Image8U3& image);
 	bool LoadImage(const String& fileName, unsigned nMaxResolution=0);
 	bool ReloadImage(unsigned nMaxResolution=0, bool bLoadPixels=true);
+	void LoadMask();
 	void ReleaseImage();
 	float ResizeImage(unsigned nMaxResolution=0);
 	unsigned RecomputeMaxResolution(unsigned& level, unsigned minImageSize) const;

@@ -45,7 +45,7 @@ IMAGEPTR Image::OpenImage(const String& fileName)
 	#if 0
 	if (Util::isFullPath(fileName))
 		return IMAGEPTR(CImage::Create(fileName, CImage::READ));
-	return IMAGEPTR(CImage::Create((Util::getCurrentFolder()+fileName).c_str(), CImage::READ));
+	return IMAGEPTR(CImage::Create((Util::getCurrentDirectory()+fileName).c_str(), CImage::READ));
 	#else
 	return IMAGEPTR(CImage::Create(fileName, CImage::READ));
 	#endif
@@ -102,6 +102,8 @@ bool Image::LoadImage(const String& fileName, unsigned nMaxResolution)
 		LOG("error: failed loading image '%s'", name.c_str());
 		return false;
 	}
+	// load mask
+	LoadMask();
 	// resize image if needed
 	scale = ResizeImage(nMaxResolution);
 	return true;
@@ -120,6 +122,8 @@ bool Image::ReloadImage(unsigned nMaxResolution, bool bLoadPixels)
 		// init image size
 		width = pImage->GetWidth();
 		height = pImage->GetHeight();
+	} else {
+		LoadMask();
 	}
 	// resize image if needed
 	scale = ResizeImage(nMaxResolution);
@@ -127,10 +131,25 @@ bool Image::ReloadImage(unsigned nMaxResolution, bool bLoadPixels)
 } // ReloadImage
 /*----------------------------------------------------------------*/
 
+// load mask image based on loaded image file name
+void Image::LoadMask() {
+	String maskName = name + ".mask.png";
+	IMAGEPTR pMask(OpenImage(maskName));
+	if (pMask != NULL) {
+		Image8U3 maskTmp;
+		if (!ReadImage(pMask, maskTmp)) {
+			LOG("error: failed loading image mask '%s'", maskName.c_str());
+		} else {
+			maskTmp.toGray(mask, cv::COLOR_BGR2GRAY, true);
+		}
+	}
+}
+
 // free the image data
 void Image::ReleaseImage()
 {
 	image.release();
+	mask.release();
 } // ReleaseImage
 /*----------------------------------------------------------------*/
 
@@ -142,7 +161,7 @@ float Image::ResizeImage(unsigned nMaxResolution)
 		width = image.width();
 		height = image.height();
 	}
-	if (nMaxResolution == 0 || MAXF(width,height) <= nMaxResolution)
+	if (nMaxResolution == 0 || (width <= nMaxResolution && height <= nMaxResolution))
 		return 1.f;
 	float scale;
 	if (width > height) {
@@ -154,22 +173,37 @@ float Image::ResizeImage(unsigned nMaxResolution)
 		width = width*nMaxResolution/height;
 		height = nMaxResolution;
 	}
-	if (!image.empty())
-		cv::resize(image, image, cv::Size((int)width, (int)height), 0, 0, cv::INTER_AREA);
+	if (!image.empty()) {
+		cv::resize(image, image, cv::Size((int)width, (int)height), 0, 0, cv::INTER_LINEAR);
+		if (!mask.empty()) {
+			cv::resize(mask, mask, cv::Size((int)width, (int)height), 0, 0, cv::INTER_LINEAR);
+		}
+	}
 	return scale;
 } // ResizeImage
+/*----------------------------------------------------------------*/
+
+// compute image scale for a given max and min resolution
+unsigned Image::ComputeMaxResolution(unsigned& level, unsigned minImageSize) const
+{
+	const unsigned maxImageSize = MAXF(width, height);
+	return Image8U3::computeMaxResolution(maxImageSize, level, minImageSize);
+} // ComputeMaxResolution
 /*----------------------------------------------------------------*/
 
 // compute image scale for a given max and min resolution, using the current image file data
 unsigned Image::RecomputeMaxResolution(unsigned& level, unsigned minImageSize) const
 {
 	IMAGEPTR pImage(ReadImageHeader(name));
+	unsigned maxImageSize;
 	if (pImage == NULL) {
 		// something went wrong, use the current known size (however it will most probably fail later)
-		return Image8U3::computeMaxResolution(width, height, level, minImageSize);
+		maxImageSize = MAXF(width, height);
+	} else {
+		// re-compute max image size
+		maxImageSize = MAXF(pImage->GetWidth(), pImage->GetHeight());
 	}
-	// re-compute max image size
-	return Image8U3::computeMaxResolution(pImage->GetWidth(), pImage->GetHeight(), level, minImageSize);
+	return Image8U3::computeMaxResolution(maxImageSize, level, minImageSize);
 } // RecomputeMaxResolution
 /*----------------------------------------------------------------*/
 
