@@ -768,7 +768,7 @@ bool MVS::ExportDepthMap(const String& fileName, const DepthMap& depthMap, Depth
 		if (minDepth < 0.1f)
 			minDepth = 0.1f;
 		if (maxDepth < 0.1f)
-			maxDepth = 30.f;
+			maxDepth = 10.f;
 		DEBUG_ULTIMATE("\tdepth range: [%g, %g]", minDepth, maxDepth);
 	}
 	const Depth deltaDepth = maxDepth - minDepth;
@@ -776,11 +776,23 @@ bool MVS::ExportDepthMap(const String& fileName, const DepthMap& depthMap, Depth
 	Image8U img(depthMap.size());
 	for (size_t i=depthMap.area(); i>0; ) {
 		const Depth depth = depthMap[--i];
+		// img[i] = (depth > 0 ? (uint8_t)CLAMP(depth*255.f/deltaDepth, 0.f, 255.f) : 0);
 		img[i] = (depth > 0 ? (uint8_t)CLAMP((maxDepth-depth)*255.f/deltaDepth, 0.f, 255.f) : 0);
 	}
 	return img.Save(fileName);
 } // ExportDepthMap
 /*----------------------------------------------------------------*/
+
+//custom exporter
+bool MVS::ExportDepthMapAsPFM(const String& fileName, const DepthMap& depthMap) {
+	Image32F img(depthMap.size());
+	std::cout << depthMap.size() << std::endl;
+	for (size_t i = depthMap.area(); i > 0; ) {
+		const Depth depth = depthMap(--i);
+		img[i] = (depth > 0 ? depth: 0);
+	}
+	return img.Save(fileName);
+} 
 
 // export normal map as an image
 bool MVS::ExportNormalMap(const String& fileName, const NormalMap& normalMap)

@@ -102,11 +102,12 @@ public:
 	static IMAGEPTR ReadImageHeader(const String& fileName);
 	static IMAGEPTR ReadImage(const String& fileName, Image8U3& image);
 	static bool ReadImage(IMAGEPTR pImage, Image8U3& image);
-	bool LoadImage(const String& fileName, unsigned nMaxResolution=0);
-	bool ReloadImage(unsigned nMaxResolution=0, bool bLoadPixels=true);
+	bool LoadImage(const String& fileName, unsigned nMaxResolution=0, bool bLoadMask=false);
+	bool ReloadImage(unsigned nMaxResolution=0, bool bLoadPixels=true, bool bLoadMask=false);
 	void LoadMask();
 	void ReleaseImage();
 	float ResizeImage(unsigned nMaxResolution=0);
+	// unsigned ComputeMaxResolution(unsigned& level, unsigned minImageSize) const;
 	unsigned RecomputeMaxResolution(unsigned& level, unsigned minImageSize) const;
 
 	Camera GetCamera(const PlatformArr& platforms, const Image8U::Size& resolution) const;

@@ -313,6 +313,27 @@ public:
 			#endif
 	}
 
+	static String& ensureDirectorySlash(String& aFile)
+	{
+		if (aFile.empty())
+			return aFile;
+		String::size_type nEnd = aFile.size()-1;
+		if (aFile[nEnd] != PATH_SEPARATOR)
+			aFile += PATH_SEPARATOR;
+		return aFile;
+	}
+
+	static void ensureDirectory(const String& aFile)
+	{
+		String::size_type start = 0;
+		while ((start = aFile.find(PATH_SEPARATOR, start)) != String::npos)
+			#ifdef _MSC_VER
+			CreateDirectory(aFile.substr(0, ++start).c_str(), NULL);
+			#else
+			mkdir(aFile.substr(0, ++start).c_str(), 0755);
+			#endif
+	}
+
 	static String& ensureValidPath(String& path) {
 		return simplifyPath(ensureUnifySlash(strTrim(path, _T("\""))));
 	}
@@ -644,7 +665,7 @@ public:
 	 *     http://en.wikipedia.org/wiki/Cyclic_redundancy_check
 	 * The generator polynomial is x^64 + x^4 + x^3 + x + 1.
 	 *     Reverse polynom: 0xd800000000000000ULL
-	 *     
+	 *
 	 * As in: http://www.virtualbox.org/svn/vbox/trunk/src/VBox/Runtime/common/checksum/crc64.cpp
 	 */
 
