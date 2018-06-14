@@ -45,18 +45,21 @@
 #  e.g. --1 p ULTRA to use the ULTRA preset in openMVG_main_ComputeFeatures
 
 
-import commands
+#lsimport commands
 import os
 import subprocess
 import sys
 
 # Indicate the openMVG and openMVS binary directories
-OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release"
-OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"
+#OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release" fzl annotation
+#OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
+   
+OPENMVG_BIN = "/home/zhili/openMVG/build-internal-eigen/Linux-x86_64-Release"
+OPENMVS_BIN = "/home/zhili/openMVS/custom_build/bin"
 
 # Indicate the openMVG camera sensor width directory
-CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN
-
+#CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation
+CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/zhili/zhili_data"
 DEBUG=False
 
 ## HELPERS for terminal colors
@@ -104,7 +107,7 @@ class stepsStore :
         self.steps_data=[
             [   "Intrinsics analysis",
                 os.path.join(OPENMVG_BIN,"openMVG_main_SfMInit_ImageListing"),
-                ["-i", "%input_dir%", "-o", "%matches_dir%"] ],
+                ["-i", "%input_dir%", "-o", "%matches_dir%", "-d", "%camera_file_params%"] ],
             [   "Compute features",
                 os.path.join(OPENMVG_BIN,"openMVG_main_ComputeFeatures"),
                 ["-i", "%matches_dir%/sfm_data.json", "-o", "%matches_dir%", "-m", "SIFT", "-n", "4"] ],
@@ -128,7 +131,9 @@ class stepsStore :
                 ["-i", "%reconstruction_dir%/sfm_data.bin", "-o", "%mvs_dir%/scene.mvs","-d","%mvs_dir%"]],
             [   "Densify point cloud",
                 os.path.join(OPENMVS_BIN,"DensifyPointCloud"),
-                ["scene.mvs", "-w","%mvs_dir%"]],
+                ["scene.mvs", "-w","%mvs_dir%/","-c","%input_dir%/config.cfg"]],
+                #["scene.mvs", "-w","%mvs_dir%"]],
+
             [   "Reconstruct the mesh",
                 os.path.join(OPENMVS_BIN,"ReconstructMesh"),
                 ["scene_dense.mvs", "-w","%mvs_dir%"]],
@@ -219,10 +224,10 @@ mkdir_ine(conf.mvs_dir)
 steps.apply_conf(conf)
 
 ## WALK
-print "# Using input dir  :  %s" % conf.input_dir
-print "#       output_dir :  %s" % conf.output_dir
-print "# First step  :  %i" % conf.first_step
-print "# Last step :  %i" % conf.last_step
+print ("# Using input dir  :  %s" % conf.input_dir)
+print ("#       output_dir :  %s" % conf.output_dir)
+print ("# First step  :  %i" % conf.first_step)
+print ("# Last step :  %i" % conf.last_step) 
 for cstep in range(conf.first_step, conf.last_step+1):
     printout("#%i. %s" % (cstep, steps[cstep].info), effect=INVERSE)
 
@@ -241,7 +246,7 @@ for cstep in range(conf.first_step, conf.last_step+1):
         if anOpt in opt :
           idx=steps[cstep].opt.index(anOpt)
           if DEBUG :
-            print '#\t'+'Remove '+ str(anOpt) + ' from defaults options at id ' + str(idx)
+            print ('#\t'+'Remove '+ str(anOpt) + ' from defaults options at id ' + str(idx)) 
           del steps[cstep].opt[idx:idx+2]
 
     cmdline = [steps[cstep].cmd] + steps[cstep].opt + opt
@@ -250,4 +255,4 @@ for cstep in range(conf.first_step, conf.last_step+1):
         pStep = subprocess.Popen(cmdline)
         pStep.wait()
     else:
-        print '\t'+' '.join(cmdline)
+        print('\t'+' '.join(cmdline))
