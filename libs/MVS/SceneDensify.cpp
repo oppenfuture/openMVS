@@ -1735,6 +1735,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// try to load already compute depth-map for this image
 			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
+				depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
 				if (OPTDENSE::nOptimize & (OPTDENSE::OPTIMIZE)) {
 					// optimize depth-map
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
@@ -1796,12 +1797,15 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const uint32_t idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.detphMaps.arrDepthData[idx]);
+			ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
+			//printf("SAVE PFM IMAGE DONE!!\n");
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
 			if (g_nVerbosityLevel > 2) {
-				ExportDepthMap(ComposeDepthFilePath(idx, "png"), depthData.depthMap);
-				ExportConfidenceMap(ComposeDepthFilePath(idx, "conf.png"), depthData.confMap);
-				ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+				
+				//ExportDepthMap(ComposeDepthFilePath(idx, "png"), depthData.depthMap);
+				//ExportConfidenceMap(ComposeDepthFilePath(idx, "conf.png"), depthData.confMap);
+				//ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 				if (g_nVerbosityLevel > 4) {
 					ExportNormalMap(ComposeDepthFilePath(idx, "normal.png"), depthData.normalMap);
 					depthData.confMap.Save(ComposeDepthFilePath(idx, "conf.pfm"));

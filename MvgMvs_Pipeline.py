@@ -54,12 +54,12 @@ import sys
 #OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release" fzl annotation
 #OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
    
-OPENMVG_BIN = "/home/zhili/openMVG/build-internal-eigen/Linux-x86_64-Release"
-OPENMVS_BIN = "/home/zhili/openMVS/custom_build/bin"
+OPENMVG_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVG_Build/Linux-x86_64-RELEASE"
+OPENMVS_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVS_build/bin"
 
 # Indicate the openMVG camera sensor width directory
 #CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation
-CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/zhili/zhili_data"
+CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/oppenmitsuba/hulin_data"
 DEBUG=False
 
 ## HELPERS for terminal colors
@@ -107,10 +107,10 @@ class stepsStore :
         self.steps_data=[
             [   "Intrinsics analysis",
                 os.path.join(OPENMVG_BIN,"openMVG_main_SfMInit_ImageListing"),
-                ["-i", "%input_dir%", "-o", "%matches_dir%", "-d", "%camera_file_params%"] ],
+                ["-i", "%input_dir%", "-o", "%matches_dir%", "-d", "%camera_file_params%", "-f", "3000"] ],
             [   "Compute features",
                 os.path.join(OPENMVG_BIN,"openMVG_main_ComputeFeatures"),
-                ["-i", "%matches_dir%/sfm_data.json", "-o", "%matches_dir%", "-m", "SIFT", "-n", "4"] ],
+                ["-i", "%matches_dir%/sfm_data.json", "-o", "%matches_dir%", "-m", "SIFT", "-n", "4", "-p", "NORMAL"] ],
             [   "Compute matches",
                 os.path.join(OPENMVG_BIN, "openMVG_main_ComputeMatches"),
                 ["-i", "%matches_dir%/sfm_data.json", "-o", "%matches_dir%"] ],
