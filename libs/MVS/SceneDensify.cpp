@@ -1735,6 +1735,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// try to load already compute depth-map for this image
 			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
+				depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
 				if (OPTDENSE::nOptimize & (OPTDENSE::OPTIMIZE)) {
 					// optimize depth-map
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
@@ -1796,6 +1797,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const uint32_t idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.detphMaps.arrDepthData[idx]);
+			ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
 			if (g_nVerbosityLevel > 2) {
