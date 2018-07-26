@@ -189,6 +189,10 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	// start memory dumper
 	MiniDumper::Create(APPNAME, WORKING_FOLDER);
 	#endif
+
+	if (WORKING_FOLDER.back() != '/' && WORKING_FOLDER.back() != '\\')
+		WORKING_FOLDER = WORKING_FOLDER + "/";
+
 	return true;
 }
 
