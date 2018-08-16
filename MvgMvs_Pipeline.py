@@ -17,15 +17,11 @@
 # 1. Compute features   openMVG_main_ComputeFeatures
 # 2. Compute matches    openMVG_main_ComputeMatches
 # 3. Incremental reconstruction openMVG_main_IncrementalSfM
-# 4. Colorize Structure openMVG_main_ComputeSfM_DataColor
-# 5. Structure from Known Poses openMVG_main_ComputeStructureFromKnownPoses
-# 6. Colorized robust triangulation openMVG_main_ComputeSfM_DataColor
-# 7. Export to openMVS  openMVG_main_openMVG2openMVS
-# 8. Densify point cloud  OpenMVS/DensifyPointCloud
-# 9. Reconstruct the mesh OpenMVS/ReconstructMesh
-# 10. Simplify the mesh OpenMVS/ReplaceMesh
-# 11. Refine the mesh   OpenMVS/RefineMesh
-# 12. Texture the mesh  OpenMVS/TextureMesh
+# 4. Export to openMVS  openMVG_main_openMVG2openMVS
+# 5. Densify point cloud  OpenMVS/DensifyPointCloud
+# 6. Reconstruct the mesh OpenMVS/ReconstructMesh
+# 7. Simplify the mesh OpenMVS/ReplaceMesh
+# 8. Refine the mesh   OpenMVS/RefineMesh
 #
 #positional arguments:
 #  input_dir             the directory which contains the pictures set.
@@ -37,30 +33,23 @@
 #                        the first step to process
 #  -l LAST_STEP, --last_step LAST_STEP
 #                        the last step to process
-#  -i INTRINSICS_FILE, --intrinsics INTRINSICS_FILE
-#                        the file containing intrinsics parameter
 #
 #Passthrough:
 #  Option to be pass to command lines (remove - in front of option names)
 #  e.g. --1 p ULTRA to use the ULTRA preset in openMVG_main_ComputeFeatures
 
 
-#lsimport commands
 import os
 import subprocess
 import sys
-import json
+import json, time
 
 # Indicate the openMVG and openMVS binary directories
-#OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release" fzl annotation
-#OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
-   
-OPENMVG_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVG_Build/Linux-x86_64-RELEASE"
-OPENMVS_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVS_build/bin"
+OPENMVG_BIN = "../build/bin/x64/Release"
+OPENMVS_BIN = "../build/bin/x64/Release"
 
 # Indicate the openMVG camera sensor width directory
-#CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation
-CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/oppenmitsuba/hulin_data"
+CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN
 DEBUG=False
 
 ## HELPERS for terminal colors
@@ -118,23 +107,12 @@ class stepsStore :
             [   "Incremental reconstruction",
                 os.path.join(OPENMVG_BIN, "openMVG_main_IncrementalSfM"),
                 ["-i", "%matches_dir%/sfm_data.json", "-m", "%matches_dir%", "-o", "%reconstruction_dir%"] ],
-            [   "Colorize Structure",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeSfM_DataColor"),
-                ["-i", "%reconstruction_dir%/sfm_data.bin", "-o", "%reconstruction_dir%/colorized.ply"]],
-            [   "Structure from Known Poses",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeStructureFromKnownPoses"),
-                ["-i", "%reconstruction_dir%/sfm_data.bin", "-m", "%matches_dir%", "-f", "%matches_dir%/matches.f.bin", "-o", "%reconstruction_dir%/robust.bin"]],
-            [   "Colorized robust triangulation",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeSfM_DataColor"),
-                ["-i", "%reconstruction_dir%/robust.bin", "-o", "%reconstruction_dir%/robust_colorized.ply"]],
             [   "Export to openMVS",
                 os.path.join(OPENMVG_BIN,"openMVG_main_openMVG2openMVS"),
                 ["-i", "%reconstruction_dir%/sfm_data_all.json", "-o", "%mvs_dir%/scene.mvs","-d","%mvs_dir%"]],
             [   "Densify point cloud",
                 os.path.join(OPENMVS_BIN,"DensifyPointCloud"),
-                ["scene.mvs", "-w","%mvs_dir%/","-c","%input_dir%/config.cfg"]],
-                #["scene.mvs", "-w","%mvs_dir%"]],
-
+                ["scene.mvs", "-w","%mvs_dir%"]],
             [   "Reconstruct the mesh",
                 os.path.join(OPENMVS_BIN,"ReconstructMesh"),
                 ["scene_dense.mvs", "-w","%mvs_dir%"]],
@@ -143,10 +121,7 @@ class stepsStore :
                 ["%mvs_dir%", "scene_dense_mesh.mvs", "scene_dense_mesh_sim.mvs"]],
             [   "Refine the mesh",
                 os.path.join(OPENMVS_BIN,"RefineMesh"),
-                ["scene_dense_mesh_sim.mvs", "-w","%mvs_dir%"]],
-            [   "Texture the mesh",
-                os.path.join(OPENMVS_BIN,"TextureMesh"),
-                ["scene_dense_mesh_sim_refine.mvs", "-w","%mvs_dir%"]]
+                ["scene_dense_mesh_sim.mvs", "-w","%mvs_dir%"]]
             ]
 
     def __getitem__(self, indice):
@@ -168,12 +143,6 @@ class stepsStore :
                 co=co.replace("%camera_file_params%",conf.camera_file_params)
                 o2.append(co)
 
-            if s[0] == 'Intrinsics analysis' and conf.intrinsics:
-                with open(os.path.join(conf.input_dir, conf.intrinsics)) as f:
-                    line = f.readline()
-                    data = line.strip().split()[0]
-                    o2.extend(['-f', data])
-
             s[2]=o2
 
 steps=stepsStore()
@@ -188,8 +157,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('input_dir', help="the directory wich contains the pictures set.")
 parser.add_argument('output_dir', help="the directory wich will contain the resulting files.")
 parser.add_argument('-f','--first_step', type=int, default=0, help="the first step to process")
-parser.add_argument('-l','--last_step', type=int, default=11, help="the last step to process" )
-parser.add_argument('-i', '--intrinsics', type=str, default='', help="the file containing intrinsics parameter")
+parser.add_argument('-l','--last_step', type=int, default=8, help="the last step to process" )
 
 group = parser.add_argument_group('Passthrough',description="Option to be passed to command lines (remove - in front of option names)\r\ne.g. --1 p ULTRA to use the ULTRA preset in openMVG_main_ComputeFeatures")
 for n in range(steps.length()) :
@@ -241,10 +209,10 @@ if os.path.exists(os.path.join(conf.reconstruction_dir,"sfm_data_all.json")):
         json.dump(json_obj, outfile)
 
 ## WALK
-print ("# Using input dir  :  %s" % conf.input_dir)
-print ("#       output_dir :  %s" % conf.output_dir)
-print ("# First step  :  %i" % conf.first_step)
-print ("# Last step :  %i" % conf.last_step) 
+print("# Using input dir  :  %s" % conf.input_dir)
+print("#       output_dir :  %s" % conf.output_dir)
+print("# First step  :  %i" % conf.first_step)
+print("# Last step :  %i" % conf.last_step)
 for cstep in range(conf.first_step, conf.last_step+1):
     printout("#%i. %s" % (cstep, steps[cstep].info), effect=INVERSE)
 
@@ -263,13 +231,17 @@ for cstep in range(conf.first_step, conf.last_step+1):
         if anOpt in opt :
           idx=steps[cstep].opt.index(anOpt)
           if DEBUG :
-            print ('#\t'+'Remove '+ str(anOpt) + ' from defaults options at id ' + str(idx)) 
+            print('#\t'+'Remove '+ str(anOpt) + ' from defaults options at id ' + str(idx))
           del steps[cstep].opt[idx:idx+2]
 
     cmdline = [steps[cstep].cmd] + steps[cstep].opt + opt
 
+
+    start_time = time.time()
     if not DEBUG :
         pStep = subprocess.Popen(cmdline)
         pStep.wait()
     else:
         print('\t'+' '.join(cmdline))
+    elapsed_time = time.time() - start_time
+    print('Step {} elapsed time {}'.format(steps[cstep].info, elapsed_time))
