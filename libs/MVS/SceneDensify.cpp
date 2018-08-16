@@ -1508,7 +1508,7 @@ struct DenseDepthMapData {
 };
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
-bool Scene::DenseReconstruction()
+bool Scene::DenseReconstruction(bool exportDmapOnly)
 {
 	DenseDepthMapData data(*this);
 
@@ -1625,13 +1625,16 @@ bool Scene::DenseReconstruction()
 	if (nMaxThreads > 1) {
 		// multi-thread execution
 		cList<SEACAVE::Thread> threads(2);
+		myPara * mPtr = new myPara;
+		mPtr->data = &data;
+		mPtr->exportDmapOnly = exportDmapOnly;
 		FOREACHPTR(pThread, threads)
-			pThread->start(DenseReconstructionEstimateTmp, (void*)&data);
+			pThread->start(DenseReconstructionEstimateTmp, (void*)mPtr);
 		FOREACHPTR(pThread, threads)
 			pThread->join();
 	} else {
 		// single-thread execution
-		DenseReconstructionEstimate((void*)&data);
+		DenseReconstructionEstimate((void*)&data,exportDmapOnly);
 	}
 	GET_LOGCONSOLE().Play();
 	if (!data.events.IsEmpty())
@@ -1710,7 +1713,7 @@ void* DenseReconstructionEstimateTmp(void* arg) {
 }
 
 // initialize the dense reconstruction with the sparse point cloud
-void Scene::DenseReconstructionEstimate(void* pData)
+void Scene::DenseReconstructionEstimate(void* pData, bool exportDmapOnly)
 {
 	DenseDepthMapData& data = *((DenseDepthMapData*)pData);
 	while (true) {
