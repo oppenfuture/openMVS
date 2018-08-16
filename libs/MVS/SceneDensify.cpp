@@ -1506,7 +1506,6 @@ struct DenseDepthMapData {
 			sem.Signal((unsigned)images.GetSize()*2);
 	}
 };
-
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
 bool Scene::DenseReconstruction()
@@ -1639,6 +1638,9 @@ bool Scene::DenseReconstruction()
 		return false;
 	data.progress.Release();
 
+	if(exportDmapOnly)
+		return true;
+
 	if ((OPTDENSE::nOptimize & OPTDENSE::ADJUST_FILTER) != 0) {
 		// initialize the queue of depth-maps to be filtered
 		data.sem.Clear();
@@ -1702,7 +1704,7 @@ bool Scene::DenseReconstruction()
 /*----------------------------------------------------------------*/
 
 void* DenseReconstructionEstimateTmp(void* arg) {
-	const DenseDepthMapData& dataThreads = *((const DenseDepthMapData*)arg);
+	const DenseDepthMapData& dataThreads = *((const DenseDepthMapData *)arg);
 	dataThreads.scene.DenseReconstructionEstimate(arg);
 	return NULL;
 }
@@ -1735,7 +1737,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// try to load already compute depth-map for this image
 			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
-				depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
+				if(!exportDmapOnly && access(ComposeDepthFilePath(idx, "pfm").c_str(),0) != -1)
+					depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
 				if (OPTDENSE::nOptimize & (OPTDENSE::OPTIMIZE)) {
 					// optimize depth-map
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
@@ -1797,7 +1800,6 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const uint32_t idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.detphMaps.arrDepthData[idx]);
-			ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
 			if (g_nVerbosityLevel > 2) {
@@ -1811,6 +1813,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			#endif
 			// save compute depth-map for this image
+			if(exportDmapOnly)
+				ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
 			depthData.ReleaseImages();
 			depthData.Release();
