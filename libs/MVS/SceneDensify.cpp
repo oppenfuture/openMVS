@@ -1506,10 +1506,13 @@ struct DenseDepthMapData {
 			sem.Signal((unsigned)images.GetSize()*2);
 	}
 };
-
+struct myPara{
+	DenseDepthMapData* data;
+	bool exportDmapOnly;
+};
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
-bool Scene::DenseReconstruction()
+bool Scene::DenseReconstruction(bool exportDmapOnly)
 {
 	DenseDepthMapData data(*this);
 
@@ -1626,13 +1629,16 @@ bool Scene::DenseReconstruction()
 	if (nMaxThreads > 1) {
 		// multi-thread execution
 		cList<SEACAVE::Thread> threads(2);
+		myPara * mPtr = new myPara;
+		mPtr->data = &data;
+		mPtr->exportDmapOnly = exportDmapOnly;
 		FOREACHPTR(pThread, threads)
-			pThread->start(DenseReconstructionEstimateTmp, (void*)&data);
+			pThread->start(DenseReconstructionEstimateTmp, (void*)mPtr);
 		FOREACHPTR(pThread, threads)
 			pThread->join();
 	} else {
 		// single-thread execution
-		DenseReconstructionEstimate((void*)&data);
+		DenseReconstructionEstimate((void*)&data,exportDmapOnly);
 	}
 	GET_LOGCONSOLE().Play();
 	if (!data.events.IsEmpty())
@@ -1702,13 +1708,14 @@ bool Scene::DenseReconstruction()
 /*----------------------------------------------------------------*/
 
 void* DenseReconstructionEstimateTmp(void* arg) {
-	const DenseDepthMapData& dataThreads = *((const DenseDepthMapData*)arg);
-	dataThreads.scene.DenseReconstructionEstimate(arg);
+	myPara* mPtr = (myPara *)arg;
+	const DenseDepthMapData& dataThreads = *(mPtr->data);
+	dataThreads.scene.DenseReconstructionEstimate((void *)mPtr->data,mPtr->exportDmapOnly);
 	return NULL;
 }
 
 // initialize the dense reconstruction with the sparse point cloud
-void Scene::DenseReconstructionEstimate(void* pData)
+void Scene::DenseReconstructionEstimate(void* pData, bool exportDmapOnly)
 {
 	DenseDepthMapData& data = *((DenseDepthMapData*)pData);
 	while (true) {
@@ -1735,7 +1742,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// try to load already compute depth-map for this image
 			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
-				depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
+				if(!exportDmapOnly)
+					depthData.depthMap.Load(ComposeDepthFilePath(idx, "pfm"));	
 				if (OPTDENSE::nOptimize & (OPTDENSE::OPTIMIZE)) {
 					// optimize depth-map
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
@@ -1797,13 +1805,13 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const uint32_t idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.detphMaps.arrDepthData[idx]);
-			ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
 			if (g_nVerbosityLevel > 2) {
-				ExportDepthMap(ComposeDepthFilePath(idx, "png"), depthData.depthMap);
-				ExportConfidenceMap(ComposeDepthFilePath(idx, "conf.png"), depthData.confMap);
-				ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+				
+				//ExportDepthMap(ComposeDepthFilePath(idx, "png"), depthData.depthMap);
+				//ExportConfidenceMap(ComposeDepthFilePath(idx, "conf.png"), depthData.confMap);
+				//ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 				if (g_nVerbosityLevel > 4) {
 					ExportNormalMap(ComposeDepthFilePath(idx, "normal.png"), depthData.normalMap);
 					depthData.confMap.Save(ComposeDepthFilePath(idx, "conf.pfm"));
@@ -1811,6 +1819,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			#endif
 			// save compute depth-map for this image
+			if(exportDmapOnly)
+				ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
 			depthData.ReleaseImages();
 			depthData.Release();

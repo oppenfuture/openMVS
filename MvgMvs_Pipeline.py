@@ -56,7 +56,7 @@ import json
 #OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
    
 OPENMVG_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVG_Build/Linux-x86_64-RELEASE"
-OPENMVS_BIN = "/home/oppenmitsuba/gitFile/openMVS_build/bin"
+OPENMVS_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVS_build/bin"
 
 # Indicate the openMVG camera sensor width directory
 #CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation

@@ -332,7 +332,6 @@ bool Scene::Load(const String& fileName)
 				TD_TIMER_GET_FMT().c_str(),
 				images.GetSize(), nCalibratedImages, (double)nTotalPixels/(1024.0*1024.0), (double)nTotalPixels/(1024.0*1024.0*nCalibratedImages),
 				pointcloud.points.GetSize(), mesh.vertices.GetSize(), mesh.faces.GetSize());
-	
 	int removedPointNum = 0;
 	VERBOSE("there are %d points to be checked",pointcloud.points.GetSize());
 	for(unsigned int idx = 0; idx < pointcloud.points.GetSize(); idx ++)
