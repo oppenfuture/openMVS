@@ -1639,6 +1639,9 @@ bool Scene::DenseReconstruction()
 		return false;
 	data.progress.Release();
 
+	if (exportDmapOnly)
+		return true;
+
 	if ((OPTDENSE::nOptimize & OPTDENSE::ADJUST_FILTER) != 0) {
 		// initialize the queue of depth-maps to be filtered
 		data.sem.Clear();
@@ -1735,6 +1738,9 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// try to load already compute depth-map for this image
 			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
+				std::string depthFilePath = ComposeDepthFilePath(idx, "pfm");
+				if (!exportDmapOnly && access(depthFilePath.c_str(), 0) != -1)
+					depthData.depthMap.Load(depthFilePath);	
 				if (OPTDENSE::nOptimize & (OPTDENSE::OPTIMIZE)) {
 					// optimize depth-map
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
@@ -1809,6 +1815,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			#endif
 			// save compute depth-map for this image
+			if (exportDmapOnly)
+				ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
 			depthData.ReleaseImages();
 			depthData.Release();

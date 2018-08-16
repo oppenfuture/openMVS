@@ -49,17 +49,18 @@
 import os
 import subprocess
 import sys
+import json
 
 # Indicate the openMVG and openMVS binary directories
 #OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release" fzl annotation
 #OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
    
-OPENMVG_BIN = "/home/zhili/openMVG/build-internal-eigen/Linux-x86_64-Release"
-OPENMVS_BIN = "/home/zhili/openMVS/custom_build/bin"
+OPENMVG_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVG_Build/Linux-x86_64-RELEASE"
+OPENMVS_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVS_build/bin"
 
 # Indicate the openMVG camera sensor width directory
 #CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation
-CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/zhili/zhili_data"
+CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/oppenmitsuba/hulin_data"
 DEBUG=False
 
 ## HELPERS for terminal colors
@@ -128,7 +129,7 @@ class stepsStore :
                 ["-i", "%reconstruction_dir%/robust.bin", "-o", "%reconstruction_dir%/robust_colorized.ply"]],
             [   "Export to openMVS",
                 os.path.join(OPENMVG_BIN,"openMVG_main_openMVG2openMVS"),
-                ["-i", "%reconstruction_dir%/sfm_data.bin", "-o", "%mvs_dir%/scene.mvs","-d","%mvs_dir%"]],
+                ["-i", "%reconstruction_dir%/sfm_data_all.json", "-o", "%mvs_dir%/scene.mvs","-d","%mvs_dir%"]],
             [   "Densify point cloud",
                 os.path.join(OPENMVS_BIN,"DensifyPointCloud"),
                 ["scene.mvs", "-w","%mvs_dir%/","-c","%input_dir%/config.cfg"]],
@@ -222,6 +223,22 @@ mkdir_ine(conf.reconstruction_dir)
 mkdir_ine(conf.mvs_dir)
 
 steps.apply_conf(conf)
+# modify the json file to get currect input path
+if os.path.exists(os.path.join(conf.matches_dir,"sfm_data.json")):
+    json_file = open(os.path.join(conf.matches_dir,"sfm_data.json"))
+    json_obj = json.load(json_file)
+    json_file.close()
+    json_obj["root_path"] = conf.input_dir
+    with open(os.path.join(conf.matches_dir,"sfm_data.json"), 'w') as outfile:
+        json.dump(json_obj, outfile)
+
+if os.path.exists(os.path.join(conf.reconstruction_dir,"sfm_data_all.json")):
+    json_file = open(os.path.join(conf.reconstruction_dir,"sfm_data_all.json"))
+    json_obj = json.load(json_file)
+    json_file.close()
+    json_obj["root_path"] = conf.input_dir
+    with open(os.path.join(conf.reconstruction_dir,"sfm_data_all.json"), 'w') as outfile:
+        json.dump(json_obj, outfile)
 
 ## WALK
 print ("# Using input dir  :  %s" % conf.input_dir)
