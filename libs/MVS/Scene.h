@@ -60,8 +60,7 @@ public:
 	bool exportDmapOnly;
 
 public:
-	//inline Scene(unsigned _nMaxThreads=0) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)) {}
-	inline Scene(unsigned _nMaxThreads=0, bool _exportDmapOnly=true) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)),exportDmapOnly(_exportDmapOnly){}
+	inline Scene(unsigned _nMaxThreads=0, bool _exportDmapOnly=false) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)),exportDmapOnly(_exportDmapOnly){}
 
 	void Release();
 	bool IsEmpty() const;
