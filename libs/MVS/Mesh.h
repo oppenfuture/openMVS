@@ -138,6 +138,7 @@ public:
 	void Decimate(VertexIdxArr& verticesRemove);
 	void CloseHole(VertexIdxArr& vertsLoop);
 	void CloseHoleQuality(VertexIdxArr& vertsLoop);
+	bool OnHorizon(VIndex vertIndex, const TPoint3<Type> &camPos);
 	void RemoveFaces(FaceIdxArr& facesRemove, bool bUpdateLists=false);
 	void RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists=false);
 

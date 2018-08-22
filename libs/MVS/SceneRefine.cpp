@@ -31,6 +31,8 @@
 
 #include "Common.h"
 #include "Scene.h"
+#include <sstream>
+#include <fstream>
 
 using namespace MVS;
 
@@ -75,6 +77,22 @@ typedef Mesh::Vertex Vertex;
 typedef Mesh::VIndex VIndex;
 typedef Mesh::Face Face;
 typedef Mesh::FIndex FIndex;
+
+struct record{
+	short int camera1;
+	short int camera2;
+	int pointIdx;
+	double graX;
+	double graY;
+	double graZ;
+};
+
+struct sumGradient{
+	int pointIdx;
+	double gradX;
+	double gradY;
+	double gradZ;
+};
 
 class MeshRefine {
 public:
@@ -201,6 +219,11 @@ public:
 	const unsigned nReduceMemory; // recompute image mean and variance in order to reduce memory requirements
 	unsigned nAlternatePair; // using an image pair alternatively as reference image (0 - both, 1 - alternate, 2 - only left, 3 - only right)
 	unsigned iteration; // current refinement iteration
+	std::string dumpFileName;
+	std::string dumpRecordFileName;
+	std::string dumpSumGFileName;
+	std::vector<std::vector<bool>> onHorizon;
+	//oppencapture::SfMCameras sfm_data_;
 
 	Scene& scene; // the mesh vertices and faces
 
@@ -616,6 +639,15 @@ double MeshRefine::ScoreMesh(double* gradients)
 		ASSERT(vertexDepth.GetSize() == vertices.GetSize());
 		vertexDepth.MemsetValue(FLT_MAX);
 	}
+	//*****************************************************get all camera position for each point in mesh**************************************************
+	IIndex cameraSize = images.GetSize();
+	VIndex verticesSize = scene.mesh.vertices.size();
+	onHorizon = std::vector<std::vector<bool>>(images.GetSize(),
+		std::vector<bool>(scene.mesh.vertices.GetSize(), false));
+	for(IIndex c = 0; c < cameraSize; ++c)
+		for(VIndex v = 0; v < verticesSize; ++v)
+			onHorizon[c][v] = scene.mesh.OnHorizon(v, static_cast<Mesh::Vertex>(images[c].camera.C));
+	//******************************************************************************************************************************************************
 	ASSERT(events.IsEmpty());
 	FOREACHPTR(pPair, pairs) {
 		ASSERT(pPair->i < pPair->j);
@@ -663,6 +695,18 @@ double MeshRefine::ScoreMesh(double* gradients)
 	WaitThreadWorkers(threads.GetSize());
 	}
 
+	std::ofstream ofs(dumpSumGFileName,std::ios::binary|std::ios::app);
+	sumGradient * tmpPtr = new sumGradient;
+	FOREACH(v,vertices)
+	{
+		tmpPtr->pointIdx = v;
+		tmpPtr->gradX = photoGrad[v].x;
+		tmpPtr->gradY = photoGrad[v].y;
+		tmpPtr->gradZ = photoGrad[v].z;
+		ofs.write((char *)tmpPtr, sizeof(sumGradient));
+	}
+	delete tmpPtr;
+	ofs.close();
 	// set the final gradient as the combination of photometric and smoothness gradients
 	if (ratioRigidityElasticity >= 1.f) {
 		FOREACH(v, vertices)
@@ -1192,24 +1236,48 @@ void MeshRefine::ThProcessPair(uint32_t idxImageA, uint32_t idxImageB)
 	DST_Image(imageDZNCC);
 	DST_BitMatrix(mask);
 	Lock l(cs);
+	struct record * tmpPtr = new record;
+	tmpPtr->camera1 = (short int)idxImageA;
+	tmpPtr->camera2 = (short int)idxImageB;
+	std::ofstream ofs(dumpRecordFileName,std::ios::binary|std::ios::app);
 	if (vertexDepth.IsEmpty()) {
 		FOREACH(i, photoGrad) {
+			if(onHorizon[idxImageA][i] || onHorizon[idxImageB][i])
+				continue;
 			if (_photoGradNorm[i] > 0) {
 				photoGrad[i] += _photoGrad[i];
 				photoGradNorm[i] += 1.f;
+//				if(i == 100)
+//					printf("the sub gradient for Point 100 is: (%lf,%lf,%lf)\n",_photoGrad[i].x,_photoGrad[i].y,_photoGrad[i].z);
+				tmpPtr->graX = _photoGrad[i].x;
+				tmpPtr->graY = _photoGrad[i].y;
+				tmpPtr->graZ = _photoGrad[i].z;
+				tmpPtr->pointIdx = i;
+				ofs.write((char*)tmpPtr, sizeof(struct record));
 			}
 		}
 	} else {
 		const float depth(MINF(imageDataA.avgDepth, imageDataB.avgDepth));
 		FOREACH(i, photoGrad) {
+			if(onHorizon[idxImageA][i] || onHorizon[idxImageB][i])
+				continue;
 			if (_photoGradNorm[i] > 0) {
 				photoGrad[i] += _photoGrad[i];
 				photoGradNorm[i] += 1.f;
+//				if(i == 100)
+//					printf("the sub gradient for Point 100 is: (%lf,%lf,%lf)\n",_photoGrad[i].x,_photoGrad[i].y,_photoGrad[i].z);
+				tmpPtr->graX = _photoGrad[i].x;
+				tmpPtr->graY = _photoGrad[i].y;
+				tmpPtr->graZ = _photoGrad[i].z;
+				tmpPtr->pointIdx = i;
+				ofs.write((char*)tmpPtr, sizeof(struct record));
 				if (vertexDepth[i] > depth)
 					vertexDepth[i] = depth;
 			}
 		}
 	}
+	ofs.close();
+	delete tmpPtr;
 	scorePhoto += (float)RegularizationScale*score;
 }
 void MeshRefine::ThSmoothVertices1(VIndex idxStart, VIndex idxEnd)
@@ -1366,7 +1434,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 		} else
 		#endif // MESHOPT_CERES
 		{
-			// loop a constant number of iterations and apply the gradient
+            // loop a constant number of iterations and apply the gradient
 			int iters(75);
 			double gstep(0.4);
 			if (fGradientStep > 1) {
@@ -1380,6 +1448,13 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			Util::Progress progress(_T("Processed iterations"), iters);
 			GET_LOGCONSOLE().Pause();
 			for (int iter=0; iter<iters; ++iter) {
+				std::ostringstream os,os2,os3;
+				os << "RM_" << nScale << "_" << iter << ".txt";
+				refine.dumpFileName = MAKE_PATH(os.str());
+				os2 << "RM_" << nScale << "_" << iter << "re.txt";
+				refine.dumpRecordFileName = MAKE_PATH(os2.str());
+				os3 << "RM_" << nScale << "_" << iter << "sumG";
+				refine.dumpSumGFileName = MAKE_PATH(os3.str());
 				refine.iteration = (unsigned)iter;
 				refine.nAlternatePair = (iter+1 < iters ? nAlternatePair : 0);
 				refine.ratioRigidityElasticity = (iter <= iterStop ? fRatioRigidityElasticity : 1.f);
@@ -1390,6 +1465,9 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 				const double cost = refine.ScoreMesh(gradients.data());
 				double gv(0);
 				VIndex numVertsRemoved(0);
+				std::ofstream ofs(refine.dumpFileName,std::ios::binary|std::ios::app);
+				VIndex verticeSize = refine.vertices.size();
+				ofs.write((char *)&verticeSize, sizeof(VIndex));
 				if (bAdaptMesh) {
 					// apply gradients and
 					// remove planar vertices (small gradient and almost on the center of their surrounding patch)
@@ -1399,6 +1477,8 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 						Vertex& vert = refine.vertices[v];
 						const Point3d grad(gradients.row(v));
 						vert -= Cast<Vertex::Type>(grad*gstep);
+//						if(v == 100)
+//							printf("***the move in one iteration for point 100 is (%lf,%lf,%lf)\n",(grad*gstep).x,(grad*gstep).y,(grad*gstep).z);
 						const double gn(norm(grad));
 						gv += gn;
 						const float depth(refine.vertexDepth[v]);
@@ -1409,9 +1489,36 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 						}
 					}
 					if (!vertexRemove.IsEmpty()) {
+						int* mapArray = new int[verticeSize];
+						VIndex mapIdx = 0;
+						VIndex removedNum = 0;
+						VIndex vectorPos = 0;
+						while (mapIdx < verticeSize && vectorPos < vertexRemove.size()) {
+							while(mapIdx < vertexRemove[vectorPos]) {
+								mapArray[mapIdx] = mapIdx - removedNum;
+								++mapIdx;
+							}
+							mapArray[mapIdx++] = -1;
+							++vectorPos;
+							++removedNum;
+						}
+						while(mapIdx < verticeSize) {
+							mapArray[mapIdx] = mapIdx - removedNum;
+							mapIdx++;
+						}
+						ofs.write((char *)mapArray, sizeof(VIndex)*verticeSize);
+						ofs.close();
+						delete [] mapArray;
 						numVertsRemoved = vertexRemove.GetSize();
 						mesh.Decimate(vertexRemove);
 						refine.ListVertexFacesPost();
+					} else {
+						int* mapArray = new int[verticeSize];
+						for (VIndex mapIdx = 0; mapIdx < verticeSize; ++mapIdx)
+							mapArray[mapIdx] = mapIdx;
+						ofs.write((char *)mapArray, sizeof(VIndex)*verticeSize);
+						ofs.close();
+						delete [] mapArray;
 					}
 					refine.vertexDepth.Empty();
 				} else {
@@ -1420,12 +1527,24 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 						Vertex& vert = refine.vertices[v];
 						const Point3d grad(gradients.row(v));
 						vert -= Cast<Vertex::Type>(grad*gstep);
+//						if(v == 100)
+//							printf("***the move in one iteration for point 100 is (%lf,%lf,%lf)\n",(grad*gstep).x,(grad*gstep).y,(grad*gstep).z);
 						gv += norm(grad);
 					}
+
+					int* mapArray = new int[verticeSize];
+					for (VIndex mapIdx = 0; mapIdx < verticeSize; ++mapIdx)
+						mapArray[mapIdx] = mapIdx;
+					ofs.write((char *)mapArray, sizeof(VIndex)*verticeSize);
+					ofs.close();
+					delete [] mapArray;
 				}
 				DEBUG_EXTRA("\t%2d. f: %.5f (%.4e)\tg: %.5f (%.4e - %.4e)\ts: %.3f\tv: %5u", iter+1, cost, cost/refine.vertices.GetSize(), gradients.norm(), gradients.norm()/refine.vertices.GetSize(), gv/refine.vertices.GetSize(), gstep, numVertsRemoved);
 				gstep *= 0.98;
 				progress.display(iter);
+                String filename = String::FormatString("RM_%d_%d.ply", nScale, iter);
+                if (!mesh.Save(MAKE_PATH(filename)))
+                    DEBUG("Failed to save mesh to %s\n", MAKE_PATH(filename))
 			}
 			GET_LOGCONSOLE().Play();
 			progress.close();

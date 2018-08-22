@@ -3318,6 +3318,26 @@ void Mesh::CloseHoleQuality(VertexIdxArr& verts)
 }
 /*----------------------------------------------------------------*/
 
+bool Mesh::OnHorizon(VIndex vertIndex, const TPoint3<Type> &camPos) {
+	ASSERT(vertexFaces.GetSize() == vertices.GetSize());
+	ASSERT(faceNormals.GetSize() == faces.GetSize());
+	if (vertIndex >= vertices.size())
+		return false;
+
+	auto viewDir = vertices[vertIndex] - camPos;
+	int positive_count = 0, negative_count = 0;
+	FOREACH(idx, vertexFaces[vertIndex]) {
+		FIndex faceIndex = vertexFaces[vertIndex][idx];
+		float Dot = viewDir.dot(faceNormals[faceIndex]);
+		if(Dot < 0)
+			++negative_count;
+		if(Dot > 0)
+			++positive_count;
+	}
+
+	return !(positive_count == 0 || negative_count == 0);
+}
+
 // remove the given list of faces
 void Mesh::RemoveFaces(FaceIdxArr& facesRemove, bool bUpdateLists)
 {
