@@ -3437,7 +3437,22 @@ REAL Mesh::ComputeVolume() const
 	return volume;
 }
 /*----------------------------------------------------------------*/
-
+bool Mesh::OnHorizon(VIndex vertIndex, const TPoint3<Type> &camPos) {
+	ASSERT(vertexFaces.GetSize() == vertices.GetSize());
+	ASSERT(faceNormals.GetSize() == faces.GetSize());
+	if (vertIndex >= vertices.size())
+		return false;
+	auto viewDir = vertices[vertIndex] - camPos;
+	int positive_count = 0, negative_count = 0;
+	FOREACH(idx, vertexFaces[vertIndex]) {
+		FIndex faceIndex = vertexFaces[vertIndex][idx];
+		if (viewDir.dot(faceNormals[faceIndex]) < 0)
+			++negative_count;
+		else
+			++positive_count;
+	}
+	return !(positive_count == 0 || negative_count == 0);
+}
 
 // project mesh to the given camera plane
 void Mesh::SamplePoints(unsigned numberOfPoints, PointCloud& pointcloud) const

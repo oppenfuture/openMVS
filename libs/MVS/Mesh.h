@@ -140,7 +140,7 @@ public:
 	void CloseHoleQuality(VertexIdxArr& vertsLoop);
 	void RemoveFaces(FaceIdxArr& facesRemove, bool bUpdateLists=false);
 	void RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists=false);
-
+	bool OnHorizon(VIndex vertIndex, const TPoint3<Type> &camPos); 
 	inline Normal FaceNormal(const Face& f) const {
 		return ComputeTriangleNormal(vertices[f[0]], vertices[f[1]], vertices[f[2]]);
 	}

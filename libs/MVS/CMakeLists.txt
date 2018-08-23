@@ -12,6 +12,8 @@ if(VCG_FOUND)
 	add_definitions(${VCG_DEFINITIONS})
 endif()
 
+FIND_PACKAGE(LibLZMA ${SYSTEM_PACKAGE_REQUIRED})
+
 set(CERES_LIBS "")
 if(OpenMVS_USE_CERES)
 	FIND_PACKAGE(CERES)
@@ -42,7 +44,7 @@ cxx_library_with_type_no_pch(MVS "Libs" "" "${cxx_default}"
 set_target_pch(MVS Common.h)
 
 # Link its dependencies
-TARGET_LINK_LIBRARIES(MVS PRIVATE Common Math IO ${CERES_LIBS} ${CGAL_LIBS} ${CUDA_CUDA_LIBRARY} CGAL::CGAL)
+TARGET_LINK_LIBRARIES(MVS PRIVATE Common Math IO ${CERES_LIBS} ${CGAL_LIBS} ${CUDA_CUDA_LIBRARY} CGAL::CGAL ${LIBLZMA_LIBRARIES})
 
 # Install
 SET_TARGET_PROPERTIES(MVS PROPERTIES

@@ -54,12 +54,12 @@ import sys
 #OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release" fzl annotation
 #OPENMVS_BIN = "D:/Pro/OpenMVS/install/bin/"                    fzl annotation
    
-OPENMVG_BIN = "/home/zhili/openMVG/build-internal-eigen/Linux-x86_64-Release"
-OPENMVS_BIN = "/home/zhili/openMVS/custom_build/bin"
+OPENMVG_BIN = "/home/oppenmitsuba/openMVSandMVG/openMVG_Build/Linux-x86_64-RELEASE"
+OPENMVS_BIN = "/home/oppenmitsuba/gitFile/build/bin"
 
 # Indicate the openMVG camera sensor width directory
 #CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN    fzl annotation
-CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/zhili/zhili_data"
+CAMERA_SENSOR_WIDTH_DIRECTORY = "/home/oppenmitsuba/hulin_data"
 DEBUG=False
 
 ## HELPERS for terminal colors
@@ -117,15 +117,6 @@ class stepsStore :
             [   "Incremental reconstruction",
                 os.path.join(OPENMVG_BIN, "openMVG_main_IncrementalSfM"),
                 ["-i", "%matches_dir%/sfm_data.json", "-m", "%matches_dir%", "-o", "%reconstruction_dir%"] ],
-            [   "Colorize Structure",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeSfM_DataColor"),
-                ["-i", "%reconstruction_dir%/sfm_data.bin", "-o", "%reconstruction_dir%/colorized.ply"]],
-            [   "Structure from Known Poses",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeStructureFromKnownPoses"),
-                ["-i", "%reconstruction_dir%/sfm_data.bin", "-m", "%matches_dir%", "-f", "%matches_dir%/matches.f.bin", "-o", "%reconstruction_dir%/robust.bin"]],
-            [   "Colorized robust triangulation",
-                os.path.join(OPENMVG_BIN,"openMVG_main_ComputeSfM_DataColor"),
-                ["-i", "%reconstruction_dir%/robust.bin", "-o", "%reconstruction_dir%/robust_colorized.ply"]],
             [   "Export to openMVS",
                 os.path.join(OPENMVG_BIN,"openMVG_main_openMVG2openMVS"),
                 ["-i", "%reconstruction_dir%/sfm_data.bin", "-o", "%mvs_dir%/scene.mvs","-d","%mvs_dir%"]],
@@ -141,11 +132,8 @@ class stepsStore :
                 os.path.join(OPENMVS_BIN, "ReplaceMesh"),
                 ["%mvs_dir%", "scene_dense_mesh.mvs", "scene_dense_mesh_sim.mvs"]],
             [   "Refine the mesh",
-                os.path.join(OPENMVS_BIN,"RefineMesh"),
-                ["scene_dense_mesh_sim.mvs", "-w","%mvs_dir%"]],
-            [   "Texture the mesh",
-                os.path.join(OPENMVS_BIN,"TextureMesh"),
-                ["scene_dense_mesh_sim_refine.mvs", "-w","%mvs_dir%"]]
+                os.path.join(OPENMVS_BIN,"RefineMeshBs"),
+                ["scene_dense_mesh_sim.mvs", "-w","%mvs_dir%"]]
             ]
 
     def __getitem__(self, indice):
@@ -187,7 +175,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('input_dir', help="the directory wich contains the pictures set.")
 parser.add_argument('output_dir', help="the directory wich will contain the resulting files.")
 parser.add_argument('-f','--first_step', type=int, default=0, help="the first step to process")
-parser.add_argument('-l','--last_step', type=int, default=11, help="the last step to process" )
+parser.add_argument('-l','--last_step', type=int, default=8, help="the last step to process" )
 parser.add_argument('-i', '--intrinsics', type=str, default='', help="the file containing intrinsics parameter")
 
 group = parser.add_argument_group('Passthrough',description="Option to be passed to command lines (remove - in front of option names)\r\ne.g. --1 p ULTRA to use the ULTRA preset in openMVG_main_ComputeFeatures")
