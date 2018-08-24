@@ -20,11 +20,12 @@ int main(int argc, LPCTSTR* argv) {
     std::cerr << "Failed to load " << argv[2] << std::endl;
     return 1;
   }
-
+  /*
   std::cout << "Input new mesh name" << std::endl;
   std::string filename;
   std::cin >> filename;
-
+  */
+  std::string filename = "scene_dense_mesh_sim.ply";
   if (!scene.mesh.Load(MAKE_PATH_SAFE(filename))) {
     std::cerr << "Failed to load " << filename << std::endl;
     return 1;

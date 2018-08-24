@@ -4,7 +4,6 @@
 #
 # Project-wide settings
 CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
-
 # Name of the project.
 #
 # CMake files in this project can refer to the root source directory

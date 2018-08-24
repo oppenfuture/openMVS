@@ -1444,48 +1444,45 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 bool Scene::RefineMeshBs()
 {
 	
-	//*****load bilateral solver depth contour pfm*****
-	DepthMapArr depthMapArr;
+	//*****load bilateral solver depth contour pfm one at once*****
+	typedef TPoint3<float> Grad;
+	typedef CLISTDEF0IDX(Grad,Mesh::VIndex) GradArr;
 	int imageSize = 0;
+	int meshVerticeSize = mesh.vertices.GetSize();
 	int cameraSize = images.size();
+	GradArr gradArray(meshVerticeSize);
+	gradArray.Memset(0);
+	int gradCount[meshVerticeSize];
+	memset(gradCount,0,sizeof(int)*meshVerticeSize);
 	for ( ; ; imageSize++)
 	{
 		DepthMap contourDepthMap;
 		std::string contourDepthMapPath = ComposeDepthFilePath(imageSize,"pfm");
 		if (access(contourDepthMapPath.c_str(), 0) != -1) {
 			contourDepthMap.Load(contourDepthMapPath);
-			depthMapArr.Insert(contourDepthMap);
+			VERBOSE("image %d read done!",imageSize);
 		} else {
 			break;
 		}
-	}
-	ASSERT(imageSize <= cameraSize);
-	ASSERT(imageSize > 0);
-	typedef TPoint3<float> Grad;
-	typedef CLISTDEF0IDX(Grad,Mesh::VIndex) GradArr;
-	
-	//*****calculate gradient for all points in mesh according to the contour depth map*****
-	int meshVerticeSize = mesh.vertices.GetSize();
-	GradArr gradArray(meshVerticeSize);
-	gradArray.Memset(0);
-	int gradCount[meshVerticeSize];
-	memset(gradCount,0,sizeof(int)*meshVerticeSize);
-	//for every contour pfm image
-	FOREACH(i, depthMapArr) {
-		ASSERT(i == images[i].cameraID);
+		//*****calculate gradient for all points in mesh according to the contour depth map*****
+		//for every contour pfm image
+		int i = imageSize;
+		ASSERT(imageSize == images[i].cameraID);
 		Camera& camera = images[i].camera;
 		DepthMap distanceField;
-		cv::distanceTransform(depthMapArr[i],distanceField,CV_DIST_L2,3);
+		cv::Mat contourDepthMap8U(contourDepthMap.rows,contourDepthMap.cols,CV_8UC1);
+		contourDepthMap.convertTo(contourDepthMap8U,CV_8UC1);
+		cv::distanceTransform(contourDepthMap8U,distanceField,CV_DIST_L2,3);
 		//for every point in mesh
-		FOREACH(j, mesh.vertices) {
+		for (VIndex j = 0; j < mesh.vertices.size(); j ++) {
 			//the following is judging whether the view i can contribute to the point j {
 			//1.onHorizon 
-			if (!mesh.OnHorizon(VIndex(j),static_cast<Mesh::Vertex>(images[i].camera.C)))
-				continue;
+			//if (!mesh.OnHorizon(j,static_cast<Mesh::Vertex>(camera.C)))
+				//continue;
 			ImageRef ir(ROUND2INT(camera.TransformPointW2I(Cast<REAL>(mesh.vertices[j]))));
 			
 			//2.the point projected from world coordinate to image pixel is INSIDE THE IMAGE
-			if (!depthMapArr[i].isInsideWithBorder<float,3>(ir))
+			if (!contourDepthMap.isInsideWithBorder<float,3>(ir))
 				continue;
 			//3.the point projected from world coordinate to image pixel is NEAR THE CONTOUR
 			if (abs(distanceField(ir.y,ir.x)) > 3)
@@ -1507,14 +1504,14 @@ bool Scene::RefineMeshBs()
 				int pos = 0;
 				for (int k = 0; k < 4; k ++) {
 					int tmpGrad = abs(distanceField(tmpIr.y + ydelta[k], tmpIr.x + xdelta[k]) - 
-						   			  distanceField(tmpIr.y + ydelta[7-k], tmpIr.x + xdelta[7-k]));
+									distanceField(tmpIr.y + ydelta[7-k], tmpIr.x + xdelta[7-k]));
 					if (tmpGrad > grad) {
 						grad = tmpGrad;
 						pos = k; 
 					}
 				}
 				if (distanceField(tmpIr.y + ydelta[pos], tmpIr.x + xdelta[pos]) > 
-				    distanceField(tmpIr.y + ydelta[7-pos], tmpIr.x + xdelta[7-pos])) {
+					distanceField(tmpIr.y + ydelta[7-pos], tmpIr.x + xdelta[7-pos])) {
 					if (distanceField(tmpIr.y, tmpIr.x) > 0) {
 						tmpIr.x += xdelta[7-pos];
 						tmpIr.y += ydelta[7-pos];
@@ -1557,9 +1554,7 @@ bool Scene::RefineMeshBs()
 			gradCount[j] ++;
 			
 		}
-
 	}
-
 	//*****add gradient to mesh******
 	FOREACH(i, mesh.vertices) {
 		Mesh::Vertex& curVertex = mesh.vertices[i];
