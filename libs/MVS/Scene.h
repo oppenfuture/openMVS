@@ -37,7 +37,7 @@
 
 #include "DepthMap.h"
 #include "Mesh.h"
-
+#include <fstream>
 
 // D E F I N E S ///////////////////////////////////////////////////
 

@@ -1450,16 +1450,16 @@ bool Scene::RefineMeshBs()
 	int imageSize = 0;
 	int meshVerticeSize = mesh.vertices.GetSize();
 	int cameraSize = images.size();
-	GradArr gradArray(meshVerticeSize);
-	gradArray.Memset(0);
-	int gradCount[meshVerticeSize];
-	memset(gradCount,0,sizeof(int)*meshVerticeSize);
+	GradArr sumVec(meshVerticeSize);
+	sumVec.Memset(0);
+	int Count[meshVerticeSize];
+	memset(Count,0,sizeof(int)*meshVerticeSize);
 	for ( ; ; imageSize++)
 	{
 		DepthMap contourDepthMap;
-		std::string contourDepthMapPath = ComposeDepthFilePath(imageSize,"pfm");
-		if (access(contourDepthMapPath.c_str(), 0) != -1) {
-			contourDepthMap.Load(contourDepthMapPath);
+		std::string contourMapPath = ComposeContourFilePath(imageSize,"pfm");
+		if (access(contourMapPath.c_str(), 0) != -1) {
+			contourDepthMap.Load(contourMapPath);
 			VERBOSE("image %d read done!",imageSize);
 		} else {
 			break;
@@ -1475,21 +1475,23 @@ bool Scene::RefineMeshBs()
 		cv::distanceTransform(contourDepthMap8U,distanceField,CV_DIST_L2,3);
 		//for every point in mesh
 		for (VIndex j = 0; j < mesh.vertices.size(); j ++) {
+			auto point_cc = camera.TransformPointW2C(Cast<REAL>(mesh.vertices[j]));
+			auto point_ic = camera.TransformPointC2I(point_cc);
+			ImageRef ir(ROUND2INT(point_ic));
+			float origin_depth = point_cc.z;
 			//the following is judging whether the view i can contribute to the point j {
-			//1.onHorizon 
+			//1.onHorizon ----is this necessary?
 			//if (!mesh.OnHorizon(j,static_cast<Mesh::Vertex>(camera.C)))
-				//continue;
-			ImageRef ir(ROUND2INT(camera.TransformPointW2I(Cast<REAL>(mesh.vertices[j]))));
-			
+			//	continue;
 			//2.the point projected from world coordinate to image pixel is INSIDE THE IMAGE
 			if (!contourDepthMap.isInsideWithBorder<float,3>(ir))
 				continue;
 			//3.the point projected from world coordinate to image pixel is NEAR THE CONTOUR
-			if (abs(distanceField(ir.y,ir.x)) > 3)
+			if (abs(distanceField(ir.y,ir.x)) > 5)
 				continue;
 			//find the nearest contour for the pixel using gradient decrease
 			int maxStep = 30;
-			ImageRef tmpIr(ir);
+			ImageRef tmpIr(ir.x,ir.y);
 			bool contourFound = false;
 			//**************
 			//the following matrix is the index position shown in xdelta and delta for a point when calculating gradient 
@@ -1539,28 +1541,33 @@ bool Scene::RefineMeshBs()
 			//4. find a contour point that is nearest to the give point
 			if (!contourFound)
 				continue;
-			ImageRef contourIr(tmpIr);
+			ImageRef contourIr(tmpIr.x, tmpIr.y);
+			//5.angle of normals of contour point and projected point must less than 90 degree
 			//calculate project on image of the give mesh point
 			Point3 normalVertex = mesh.vertices[j] + mesh.vertexNormals[j]*10;
 			ImageRef normalVertexProjectIr(ROUND2INT(camera.TransformPointW2I(normalVertex)));
-			
-			//5.angle of normals of contour point and projected point must le 90 degree
 			//TODO in the future
-			
+			//1)calculate normal of contour on point (contourIr.x, contourIr.y) n1
+			//2)calculate normal of point(ir.x, ir.y) n2
+			//3)judge with the angle of n1 and n2 is less than 90 degree
+			//6.other judgement
 			//}end judgement
 
-			Point3 expectPoint = camera.TransformPointI2W(Point2(contourIr.x,contourIr.y));
-			gradArray[j] = gradArray[j] + Grad(Point3(expectPoint - Point3(mesh.vertices[j])));
-			gradCount[j] ++;
-			
+			point_cc = camera.TransformPointI2C(Point2(contourIr.x,contourIr.y));
+			point_cc = point_cc * origin_depth;
+			Point3 expectPoint = camera.TransformPointC2W(point_cc);
+			sumVec[j] = sumVec[j] + Grad(Point3(expectPoint - Point3(mesh.vertices[j])));
+			Count[j] ++;	
 		}
 	}
 	//*****add gradient to mesh******
 	FOREACH(i, mesh.vertices) {
+		if (Count[i] == 0)
+			continue;
 		Mesh::Vertex& curVertex = mesh.vertices[i];
-		curVertex = Mesh::Vertex(curVertex.x + gradArray[i].x/gradCount[i], 
-								 curVertex.y + gradArray[i].y/gradCount[i], 
-								 curVertex.z + gradArray[i].y/gradCount[i]);
+		curVertex = Mesh::Vertex(curVertex.x + sumVec[i].x/Count[i], 
+								 curVertex.y + sumVec[i].y/Count[i], 
+								 curVertex.z + sumVec[i].z/Count[i]);
 	}
 	return true;
 }

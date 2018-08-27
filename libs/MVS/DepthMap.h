@@ -43,6 +43,7 @@
 
 #define ComposeDepthFilePathBase(b, i, e) MAKE_PATH(String::FormatString((b + "%04u." e).c_str(), i))
 #define ComposeDepthFilePath(i, e) MAKE_PATH(String::FormatString("depth%04u." e, i))
+#define ComposeContourFilePath(i, e) MAKE_PATH(String::FormatString("contour%04u." e, i))
 
 
 // S T R U C T S ///////////////////////////////////////////////////
