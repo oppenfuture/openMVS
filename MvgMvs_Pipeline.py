@@ -20,8 +20,9 @@
 # 4. Export to openMVS  openMVG_main_openMVG2openMVS
 # 5. Densify point cloud  OpenMVS/DensifyPointCloud
 # 6. Reconstruct the mesh OpenMVS/ReconstructMesh
-# 7. Simplify the mesh OpenMVS/ReplaceMesh
-# 8. Refine the mesh   OpenMVS/RefineMesh
+# 7. Simplify the mesh MeshlabServer
+# 8. Replace the mesh OpenMVS/ReplaceMesh
+# 9. Refine the mesh   OpenMVS/RefineMesh
 #
 #positional arguments:
 #  input_dir             the directory which contains the pictures set.
@@ -45,8 +46,9 @@ import sys
 import json, time
 
 # Indicate the openMVG and openMVS binary directories
-OPENMVG_BIN = "../build/bin/x64/Release"
+OPENMVG_BIN = "E:/openMVG/build/Windows-AMD64-Release/Release"
 OPENMVS_BIN = "../build/bin/x64/Release"
+MESHLAB_BIN = "C:/Program Files/VCG/MeshLab/meshlabserver.exe"
 
 # Indicate the openMVG camera sensor width directory
 CAMERA_SENSOR_WIDTH_DIRECTORY = OPENMVG_BIN
@@ -117,8 +119,11 @@ class stepsStore :
                 os.path.join(OPENMVS_BIN,"ReconstructMesh"),
                 ["scene_dense.mvs", "-w","%mvs_dir%"]],
             [   "Simplify the mesh",
+                MESHLAB_BIN,
+                ["-i", "%mvs_dir%/scene_dense_mesh.ply", "-o", "%mvs_dir%/scene_dense_mesh_sim.ply", "-s", "simplify300k.mlx"]],
+            [   "Replace the mesh",
                 os.path.join(OPENMVS_BIN, "ReplaceMesh"),
-                ["%mvs_dir%", "scene_dense_mesh.mvs", "scene_dense_mesh_sim.mvs"]],
+                ["%mvs_dir%", "scene_dense_mesh.mvs", "scene_dense_mesh_sim.ply", "scene_dense_mesh_sim.mvs"]],
             [   "Refine the mesh",
                 os.path.join(OPENMVS_BIN,"RefineMesh"),
                 ["scene_dense_mesh_sim.mvs", "-w","%mvs_dir%"]]
@@ -157,7 +162,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('input_dir', help="the directory wich contains the pictures set.")
 parser.add_argument('output_dir', help="the directory wich will contain the resulting files.")
 parser.add_argument('-f','--first_step', type=int, default=0, help="the first step to process")
-parser.add_argument('-l','--last_step', type=int, default=8, help="the last step to process" )
+parser.add_argument('-l','--last_step', type=int, default=9, help="the last step to process" )
 
 group = parser.add_argument_group('Passthrough',description="Option to be passed to command lines (remove - in front of option names)\r\ne.g. --1 p ULTRA to use the ULTRA preset in openMVG_main_ComputeFeatures")
 for n in range(steps.length()) :
