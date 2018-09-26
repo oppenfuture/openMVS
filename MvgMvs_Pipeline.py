@@ -120,7 +120,7 @@ class stepsStore :
                 ["scene_dense.mvs", "-w","%mvs_dir%"]],
             [   "Simplify the mesh",
                 MESHLAB_BIN,
-                ["-i", "%mvs_dir%/scene_dense_mesh.ply", "-o", "%mvs_dir%/scene_dense_mesh_sim.ply", "-s", "simplify300k.mlx"]],
+                ["-i", "%mvs_dir%/scene_dense_mesh.ply", "-o", "%mvs_dir%/scene_dense_mesh_sim.ply", "-s", "simplify100k.mlx"]],
             [   "Replace the mesh",
                 os.path.join(OPENMVS_BIN, "ReplaceMesh"),
                 ["%mvs_dir%", "scene_dense_mesh.mvs", "scene_dense_mesh_sim.ply", "scene_dense_mesh_sim.mvs"]],
