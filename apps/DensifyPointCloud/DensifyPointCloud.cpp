@@ -54,6 +54,7 @@ int nProcessPriority;
 unsigned nMaxThreads;
 String strConfigFileName;
 boost::program_options::variables_map vm;
+bool exportDmapOnly;
 } // namespace OPT
 
 // initialize and parse the command line parameters
@@ -71,6 +72,7 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 		("config-file,c", boost::program_options::value<std::string>(&OPT::strConfigFileName)->default_value(APPNAME _T(".cfg")), "file name containing program options")
 		("archive-type", boost::program_options::value(&OPT::nArchiveType)->default_value(2), "project archive type: 0-text, 1-binary, 2-compressed binary")
 		("process-priority", boost::program_options::value(&OPT::nProcessPriority)->default_value(-1), "process priority (below normal by default)")
+		("export-dmap-only",boost::program_options::value(&OPT::exportDmapOnly)->default_value(false),"only export *.Dmap and *.raw.pfm file")
 		("max-threads", boost::program_options::value(&OPT::nMaxThreads)->default_value(0), "maximum number of threads (0 for using all available cores)")
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		("verbosity,v", boost::program_options::value(&g_nVerbosityLevel)->default_value(
@@ -210,7 +212,7 @@ int main(int argc, LPCTSTR* argv)
 	if (!Initialize(argc, argv))
 		return EXIT_FAILURE;
 
-	Scene scene(OPT::nMaxThreads);
+	Scene scene(OPT::nMaxThreads, OPT::exportDmapOnly);
 	if (OPT::fSampleMesh != 0) {
 		// sample input mesh and export the obtained point-cloud
 		if (!scene.mesh.Load(MAKE_PATH_SAFE(OPT::strInputFileName)))
