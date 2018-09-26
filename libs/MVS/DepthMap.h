@@ -110,6 +110,8 @@ extern float fRandomSmoothBonus;
 } // namespace OPTDENSE
 /*----------------------------------------------------------------*/
 
+typedef TPoint2<uint16_t> MapRef;
+typedef CLISTDEF0(MapRef) MapRefArr;
 
 struct MVS_API DepthData {
 	struct ViewData {
@@ -132,6 +134,7 @@ struct MVS_API DepthData {
 	ViewScoreArr neighbors; // array of all images seeing this depth-map (ordered by decreasing importance)
 	IndexArr points; // indices of the sparse 3D points seen by the this image
 	BitMatrix mask; // mark pixels to be ignored
+	MapRefArr coords; // map pixel index to zigzag matrix coordinates
 	DepthMap depthMap; // depth-map
 	NormalMap normalMap; // normal-map in camera space
 	ConfidenceMap confMap; // confidence-map
@@ -197,9 +200,6 @@ struct MVS_API DepthEstimator {
 		DIRS
 	};
 
-	typedef TPoint2<uint16_t> MapRef;
-	typedef CLISTDEF0(MapRef) MapRefArr;
-
 	typedef Eigen::Matrix<float,nTexels,1> TexelVec;
 	struct NeighborData {
 		Depth depth;
@@ -251,13 +251,13 @@ struct MVS_API DepthEstimator {
 	const ENDIRECTION dir;
 	const Depth dMin, dMax;
 
-	DepthEstimator(DepthData& _depthData0, volatile Thread::safe_t& _idx, const Image64F& _image0Sum, const MapRefArr& _coords, ENDIRECTION _dir);
+	DepthEstimator(DepthData& _depthData0, volatile Thread::safe_t& _idx, const Image64F& _image0Sum, ENDIRECTION _dir);
 
 	bool PreparePixelPatch(const ImageRef&);
 	bool FillPixelPatch();
 	float ScorePixel(Depth, const Normal&);
 	void ProcessPixel(IDX idx);
-	
+
 	inline float GetImage0Sum(const ImageRef& p) const {
 		const ImageRef p0(p.x-nSizeHalfWindow, p.y-nSizeHalfWindow);
 		const ImageRef p1(p0.x+nSizeWindow, p0.y);
@@ -342,7 +342,7 @@ struct MVS_API DepthEstimator {
 		ASSERT(ISEQUAL(norm(d), TR(1)));
 	}
 
-	static void MapMatrix2ZigzagIdx(const Image8U::Size& size, DepthEstimator::MapRefArr& coords, BitMatrix& mask, int rawStride=16);
+	static void MapMatrix2ZigzagIdx(const Image8U::Size& size, MapRefArr& coords, const BitMatrix& mask, int rawStride=16);
 
 	const float smoothBonusDepth, smoothBonusNormal;
 	const float smoothSigmaDepth, smoothSigmaNormal;
