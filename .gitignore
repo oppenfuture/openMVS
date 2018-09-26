@@ -36,3 +36,5 @@ CMakeSettings.json
 .vscode/
 bin/
 binaries/
+/cmake-build-debug
+/venv

@@ -57,9 +57,10 @@ public:
 	unsigned nCalibratedImages; // number of valid images
 
 	unsigned nMaxThreads; // maximum number of threads used to distribute the work load
+	bool exportDmapOnly;
 
 public:
-	inline Scene(unsigned _nMaxThreads=0) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)) {}
+	inline Scene(unsigned _nMaxThreads=0, bool _exportDmapOnly=false) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)),exportDmapOnly(_exportDmapOnly){}
 
 	void Release();
 	bool IsEmpty() const;
