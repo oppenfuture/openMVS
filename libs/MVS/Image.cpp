@@ -102,6 +102,8 @@ bool Image::LoadImage(const String& fileName, unsigned nMaxResolution)
 		LOG("error: failed loading image '%s'", name.c_str());
 		return false;
 	}
+	// load mask
+	LoadMask();
 	// resize image if needed
 	scale = ResizeImage(nMaxResolution);
 	return true;
@@ -120,6 +122,8 @@ bool Image::ReloadImage(unsigned nMaxResolution, bool bLoadPixels)
 		// init image size
 		width = pImage->GetWidth();
 		height = pImage->GetHeight();
+	} else {
+		LoadMask();
 	}
 	// resize image if needed
 	scale = ResizeImage(nMaxResolution);
@@ -127,10 +131,25 @@ bool Image::ReloadImage(unsigned nMaxResolution, bool bLoadPixels)
 } // ReloadImage
 /*----------------------------------------------------------------*/
 
+// load mask image based on loaded image file name
+void Image::LoadMask() {
+	String maskName = name + ".mask.png";
+	IMAGEPTR pMask(OpenImage(maskName));
+	if (pMask != NULL) {
+		Image8U3 maskTmp;
+		if (!ReadImage(pMask, maskTmp)) {
+			LOG("error: failed loading image mask '%s'", maskName.c_str());
+		} else {
+			maskTmp.toGray(mask, cv::COLOR_BGR2GRAY, true);
+		}
+	}
+}
+
 // free the image data
 void Image::ReleaseImage()
 {
 	image.release();
+	mask.release();
 } // ReleaseImage
 /*----------------------------------------------------------------*/
 
@@ -154,8 +173,12 @@ float Image::ResizeImage(unsigned nMaxResolution)
 		width = width*nMaxResolution/height;
 		height = nMaxResolution;
 	}
-	if (!image.empty())
+	if (!image.empty()) {
 		cv::resize(image, image, cv::Size((int)width, (int)height), 0, 0, cv::INTER_AREA);
+		if (!mask.empty()) {
+			cv::resize(mask, mask, cv::Size((int)width, (int)height), 0, 0, cv::INTER_LINEAR);
+		}
+	}
 	return scale;
 } // ResizeImage
 /*----------------------------------------------------------------*/
