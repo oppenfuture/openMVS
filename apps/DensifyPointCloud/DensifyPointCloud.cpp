@@ -55,6 +55,8 @@ unsigned nMaxThreads;
 String strConfigFileName;
 boost::program_options::variables_map vm;
 bool exportDmapOnly;
+bool importReferenceDepth;
+unsigned nPixelArea;
 String strParamsFileName;
 int algorithm;
 float fNCCThresholdKeep;
@@ -80,6 +82,8 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 		("process-priority", boost::program_options::value(&OPT::nProcessPriority)->default_value(-1), "process priority (below normal by default)")
 		("export-dmap-only",boost::program_options::value(&OPT::exportDmapOnly)->default_value(false),"only export *.Dmap and *.raw.pfm file")
 		("max-threads", boost::program_options::value(&OPT::nMaxThreads)->default_value(0), "maximum number of threads (0 for using all available cores)")
+		("import-reference-depth,d", boost::program_options::value<bool>(&OPT::importReferenceDepth)->default_value(false), "import reference depth for patch match or not(false as default)")
+		("pixelarea,p", boost::program_options::value<unsigned>(&OPT::nPixelArea)->default_value(3), "half windows size around a pixel to be initialize with the known depth")
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		("verbosity,v", boost::program_options::value(&g_nVerbosityLevel)->default_value(
 			#if TD_VERBOSE == TD_VERBOSE_DEBUG
@@ -179,6 +183,8 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	OPTDENSE::nMinViewsFuse = nMinViewsFuse;
 	OPTDENSE::nEstimateColors = nEstimateColors;
 	OPTDENSE::nEstimateNormals = nEstimateNormals;
+	OPTDENSE::importReferenceDepth = OPT::importReferenceDepth;
+	OPTDENSE::nPixelArea = OPT::nPixelArea;
 	OPTDENSE::paramsFile = MAKE_PATH_SAFE(OPT::strParamsFileName);
 	OPTDENSE::algorithm = OPT::algorithm;
 	OPTDENSE::fNCCThresholdKeep = OPT::fNCCThresholdKeep;
