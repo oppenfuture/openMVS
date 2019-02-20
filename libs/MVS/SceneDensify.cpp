@@ -141,6 +141,8 @@ public:
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
 protected:
+	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
+
 	static void* STCALL ScoreDepthMapTmp(void*);
 	static void* STCALL EstimateDepthMapTmp(void*);
 	static void* STCALL EndDepthMapTmp(void*);
@@ -644,6 +646,33 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 	return NULL;
 }
 
+bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size) {
+	// compute depth range and initialize known depths
+	const int nPixelArea = (int)OPTDENSE::nPixelArea; // half windows size around a pixel to be initialize with the known depth
+	const Camera& camera = depthData.images.First().camera;
+	depthData.dMin = FLT_MAX;
+	depthData.dMax = 0;
+	FOREACHPTR(pPoint, depthData.points) {
+		const PointCloud::Point& X = scene.pointcloud.points[*pPoint];
+		const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
+		const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
+		const float d((float)camX.z);
+		const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
+		const ImageRef ex(MINF(x.x+nPixelArea,size.width-1), MINF(x.y+nPixelArea,size.height-1));
+		for (int y=sx.y; y<=ex.y; ++y)
+			for (int x=sx.x; x<=ex.x; ++x)
+				if (depthData.mask.empty() || depthData.mask.isSet(y,x))
+					depthData.depthMap(y,x) = d;
+		if (depthData.dMin > d)
+			depthData.dMin = d;
+		if (depthData.dMax < d)
+			depthData.dMax = d;
+	}
+	depthData.dMin *= 0.9f;
+	depthData.dMax *= 1.1f;
+	return true;
+}
+
 // estimate depth-map using propagation and random refinement with NCC score
 // as in: "Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes", S. Shen, 2013
 // The implementations follows closely the paper, although there are some changes/additions.
@@ -666,48 +695,32 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	const DepthData::ViewData& image(depthData.images.First());
 	ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
 	const Image8U::Size size(image.image.size());
-	depthData.depthMap.create(size); depthData.depthMap.memset(0);
 	depthData.normalMap.create(size);
 	depthData.confMap.create(size);
 	const unsigned nMaxThreads(scene.nMaxThreads);
 
 	// initialize the depth-map
-	if (OPTDENSE::nMinViewsTrustPoint < 2) {
-		// compute depth range and initialize known depths
-		const int nPixelArea(3); // half windows size around a pixel to be initialize with the known depth
-		const Camera& camera = depthData.images.First().camera;
-		depthData.dMin = FLT_MAX;
-		depthData.dMax = 0;
-		FOREACHPTR(pPoint, depthData.points) {
-			const PointCloud::Point& X = scene.pointcloud.points[*pPoint];
-			const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
-			const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
-			const float d((float)camX.z);
-			const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
-			const ImageRef ex(MINF(x.x+nPixelArea,size.width-1), MINF(x.y+nPixelArea,size.height-1));
-			for (int y=sx.y; y<=ex.y; ++y)
-				for (int x=sx.x; x<=ex.x; ++x)
-					if (depthData.mask.empty() || depthData.mask.isSet(y,x))
-						depthData.depthMap(y,x) = d;
-			if (depthData.dMin > d)
-				depthData.dMin = d;
-			if (depthData.dMax < d)
-				depthData.dMax = d;
-		}
-		depthData.dMin *= 0.9f;
-		depthData.dMax *= 1.1f;
+	if (OPTDENSE::importReferenceDepth) {
+			// reference depth map already loaded in processimage
+			InitDepthMapWithoutTriangulation(depthData, size);
 	} else {
-		// compute rough estimates using the sparse point-cloud
-		InitDepthMap(depthData);
-		#if TD_VERBOSE != TD_VERBOSE_OFF
-		// save rough depth map as image
-		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+		depthData.depthMap.create(size); depthData.depthMap.memset(0);
+		if (OPTDENSE::nMinViewsTrustPoint < 2) {
+			InitDepthMapWithoutTriangulation(depthData, size);
+		} else {
+			// compute rough estimates using the sparse point-cloud
+			InitDepthMap(depthData);
 		}
-		#endif
 	}
+#if TD_VERBOSE != TD_VERBOSE_OFF
+    // save rough depth map as image
+    if (g_nVerbosityLevel > 4) {
+        depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+        ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+        ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+        ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+    }
+#endif
 
 	// init integral images and index to image-ref map for the reference data
 	Image64F imageSum0;
@@ -1767,6 +1780,10 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				// process next image
 				data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			} else {
+				// load reference depth map for patch match
+				if (OPTDENSE::importReferenceDepth) {
+					depthData.depthMap.Load(images[evtImage.idxImage].name + ".ref.pfm");
+				}
 				// estimate depth-map
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
@@ -1831,7 +1848,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			#endif
 			// save compute depth-map for this image
 			if (exportDmapOnly)
-				ExportDepthMapAsPFM(ComposeDepthFilePath(idx, "raw.pfm"), depthData.depthMap);
+				depthData.depthMap.Save(ComposeDepthFilePath(idx, "raw.pfm"));
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
 			depthData.ReleaseImages();
 			depthData.Release();
