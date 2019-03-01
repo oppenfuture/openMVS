@@ -2606,7 +2606,8 @@ bool TImage<TYPE>::Load(const String& fileName)
 		Base::create(h, w);
 		ASSERT(sizeof(float)*Base::channels() == Base::step.p[1]);
 		const size_t rowbytes((size_t)Base::size.p[1]*Base::step.p[1]);
-		for (int i=0; i<rows; ++i)
+		// pfm start from left bottom
+		for (int i=rows-1; i>=0; --i)
 			if (fImage.read(cv::Mat::template ptr<float>(i), rowbytes) != rowbytes)
 				return false;
 		return true;
@@ -2661,7 +2662,8 @@ bool TImage<TYPE>::Save(const String& fileName) const
 		fImage.print("Pf\n%d %d\n%lf\n", width(), height(), scale*Base::channels());
 		ASSERT(sizeof(float)*Base::channels() == Base::step.p[1]);
 		const size_t rowbytes = (size_t)Base::size.p[1]*Base::step.p[1];
-		for (int i=0; i<rows; ++i)
+		// pfm start from left bottom
+		for (int i=rows-1; i>=0; --i)
 			fImage.write(cv::Mat::template ptr<const float>(i), rowbytes);
 		return true;
 	}
