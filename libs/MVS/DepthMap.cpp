@@ -99,6 +99,8 @@ MDEFVAR_OPTDENSE_float(fRandomAngle2Range, "Random Angle2 Range", "Angle 2 range
 MDEFVAR_OPTDENSE_float(fRandomSmoothDepth, "Random Smooth Depth", "Depth variance used during neighbor smoothness assignment (ratio)", "0.006")
 MDEFVAR_OPTDENSE_float(fRandomSmoothNormal, "Random Smooth Normal", "Normal variance used during neighbor smoothness assignment (degrees)", "8.5")
 MDEFVAR_OPTDENSE_float(fRandomSmoothBonus, "Random Smooth Bonus", "Score factor used to encourage smoothness (1 - disabled)", "0.9")
+MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "params.txt")
+MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "0", "1")
 }
 
 

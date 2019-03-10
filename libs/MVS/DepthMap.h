@@ -107,6 +107,8 @@ extern float fRandomAngle2Range;
 extern float fRandomSmoothDepth;
 extern float fRandomSmoothNormal;
 extern float fRandomSmoothBonus;
+extern String paramsFile;
+extern int algorithm;
 } // namespace OPTDENSE
 /*----------------------------------------------------------------*/
 

@@ -10,7 +10,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
 # CMake files in this project can refer to the root source directory
 # as ${OpenMVS_SOURCE_DIR} and to the root binary directory as
 # ${OpenMVS_BINARY_DIR}.
-PROJECT(OpenMVS)
+PROJECT(OpenMVS LANGUAGES C CXX CUDA)
 
 set(OpenMVS_MAJOR_VERSION 0)
 set(OpenMVS_MINOR_VERSION 7)
@@ -81,9 +81,11 @@ endif()
 if(OpenMVS_USE_CUDA)
 	FIND_PACKAGE(CUDA)
 	if(CUDA_FOUND)
+		message(STATUS "Found CUDA ${CUDA_VERSION_STRING} at ${CUDA_TOOLKIT_ROOT_DIR}")
 		INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 		ADD_DEFINITIONS(-D_USE_CUDA)
 		SET(_USE_CUDA TRUE)
+		set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-O3 --use_fast_math --ptxas-options=-v -std=c++11 --compiler-options -Wall -gencode arch=compute_50,code=sm_50 -gencode arch=compute_52,code=sm_52 -gencode arch=compute_75,code=sm_75)
 	else()
 		SET(CUDA_CUDA_LIBRARY "")
 		MESSAGE("-- Can't find CUDA. Continuing without it.")

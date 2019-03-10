@@ -34,12 +34,13 @@
 // MRF: view selection
 #include "../Math/TRWS/MRFEnergy.h"
 // CGAL: depth-map initialization
+#include <cuda_runtime.h>
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Projection_traits_xy_3.h>
+#include "../Gipuma/GipumaMain.h"
 
 using namespace MVS;
-
 
 // D E F I N E S ///////////////////////////////////////////////////
 
@@ -133,6 +134,7 @@ public:
 	bool InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex numNeighbors);
 	bool InitDepthMap(DepthData& depthData);
 	bool EstimateDepthMap(IIndex idxImage);
+	bool GipumaEstimate(IIndex idxImage);
 
 	bool RemoveSmallSegments(DepthData& depthData);
 	bool GapInterpolation(DepthData& depthData);
@@ -158,6 +160,248 @@ public:
 };
 /*----------------------------------------------------------------*/
 
+/******************************************************************/
+namespace MVS {
+	cv::Mat_<float> MatxtoMat(const cv::Matx<double, 3, 4> &matx34d) {
+		cv::Mat_<float> out = cv::Mat::zeros(3, 4, CV_32FC1);
+		for (int c = 0; c < 4; ++c) {
+			for (int r = 0; r < 3; ++r) {
+				out(r, c) = matx34d(r, c);
+			}
+		}
+
+		return out;
+	}
+
+	TImage<TPoint3<float> > TransformTImage(const cv::Mat_<cv::Point3_<float> > &M) {
+		TImage<TPoint3<float> > out(M.rows, M.cols);
+		for (int c = 0; c < M.cols; ++c) {
+			for (int r = 0; r < M.rows; ++r) {
+				cv::Point3_<float> m = M(r, c);
+				TPoint3<float> n(m.x, m.y, m.z);
+				out(r, c) = n;
+			}
+		}
+		return out;
+	}
+
+	const char *_cudaGetErrorEnum(cudaError_t error)
+	{
+		switch (error)
+		{
+			case cudaSuccess:
+				return "cudaSuccess";
+
+			case cudaErrorInvalidDeviceFunction:
+				return "cudaErrorInvalidDeviceFunction";
+
+			case cudaErrorInvalidDevice:
+				return "cudaErrorInvalidDevice";
+
+			case cudaErrorUnknown:
+				return "cudaErrorUnknown";
+
+			case cudaErrorNoDevice:
+				return "cudaErrorNoDevice";
+
+			case cudaErrorDevicesUnavailable:
+				return "cudaErrorDevicesUnavailable";
+		}
+
+		return "<unknown>";
+	}
+
+	template< typename T >
+	void check(T result, char const *const func, const char *const file, int const line)
+	{
+		if (result)
+		{
+			fprintf(stderr, "CUDA error at %s:%d code=%d(%s) \"%s\" \n",
+					file, line, static_cast<unsigned int>(result), _cudaGetErrorEnum(result), func);
+			cudaDeviceReset();
+			// Make sure we call CUDA Device Reset before exiting
+					exit(EXIT_FAILURE);
+		}
+	}
+
+	template< typename T >
+	void checkCudaErrors(T val) {
+		check(val, cudaGetErrorString(val), __FILE__, __LINE__ );
+	}
+
+
+	void selectCudaDevice ()
+	{
+		int deviceCount = 0;
+		checkCudaErrors(cudaGetDeviceCount(&deviceCount));
+		if (deviceCount == 0) {
+			fprintf(stderr, "There is no cuda capable device!\n");
+			exit(EXIT_FAILURE);
+		}
+		std::cout << std::endl << "Detected " << deviceCount << " devices!" << std::endl;
+		std::vector<int> usableDevices;
+		std::vector<std::string> usableDeviceNames;
+		for (int i = 0; i < deviceCount; i++) {
+			cudaDeviceProp prop;
+			if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) {
+				if (prop.major >= 3 && prop.minor >= 0) {
+					usableDevices.push_back(i);
+					usableDeviceNames.push_back(std::string(prop.name));
+				} else {
+					std::cout << "CUDA capable device " << std::string(prop.name)
+							  << " is only compute cabability " << prop.major << '.'
+							  << prop.minor << std::endl;
+				}
+			} else {
+				std::cout << "Could not check device properties for one of the cuda "
+							 "devices!" << std::endl;
+			}
+		}
+		if(usableDevices.empty()) {
+			fprintf(stderr, "There is no cuda device supporting gipuma!\n");
+			exit(EXIT_FAILURE);
+		}
+		std::cout << "Detected gipuma compatible device: " << usableDeviceNames[0] << std::endl;;
+		checkCudaErrors(cudaSetDevice(usableDevices[0]));
+		cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024*128);
+	}
+} // namespace MVS
+/****************************************************************/
+
+
+/****************************************************************/
+bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
+	TD_TIMER_STARTD();
+
+	// initialize depth and normal maps
+	DepthData& depthData(arrDepthData[idxImage]);
+	ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
+	const DepthData::ViewData& image(depthData.images.First());
+	ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
+	const Image8U::Size size(image.image.size());
+	depthData.depthMap.create(size); depthData.depthMap.memset(0);
+	depthData.normalMap.create(size);
+	depthData.confMap.create(size);
+	const unsigned nMaxThreads(scene.nMaxThreads);
+
+	// run gipuma to estimate depthMap and normalMap
+	{
+		int numberOfImages = depthData.images.GetSize();
+		std::vector<cv::Mat_<float>> images(numberOfImages);
+		std::vector<cv::Mat_<float>> projection_matrices(numberOfImages);
+
+		for (int i = 0; i < numberOfImages; ++i) {
+			images[i] = depthData.images[i].image;
+			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
+		}
+
+		// cv::Mat_<float> depth_map;
+		cv::Mat_<cv::Point3_<float>> normal_map(depthData.normalMap.rows, depthData.normalMap.cols);
+
+		GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax,
+				   OPTDENSE::paramsFile.c_str());
+
+		// depthData.depthMap = depth_map;
+		depthData.normalMap = TransformTImage(normal_map);
+
+	#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
+		// save intermediate depth map as image
+		if (g_nVerbosityLevel > 4) {
+			const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+			depthData.depthMap.Save(path + ".depth.pfm");
+			depthData.normalMap.Save(path + ".normal.pfm");
+			ExportDepthMap(path + ".png", depthData.depthMap);
+			ExportNormalMap(path + ".normal.png", depthData.normalMap);
+			ExportPointCloud(path + ".ply", *depthData.images.First().pImageData, depthData.depthMap,
+							 depthData.normalMap);
+			ExportConfidenceMap(path + ".conf.png", depthData.confMap);
+		}
+	#endif
+	}
+
+	// init integral images and index to image-ref map for the reference data
+	Image64F imageSum0;
+	cv::integral(image.image, imageSum0, CV_64F);
+	// if (prevDepthMapSize != size) {
+	// 	prevDepthMapSize = size;
+	// 	BitMatrix mask;
+	// 	DepthEstimator::MapMatrix2ZigzagIdx(size, coords, mask, MAXF(64,(int)nMaxThreads*8));
+	// }
+
+	// init threads
+	ASSERT(nMaxThreads > 0);
+	cList<DepthEstimator> estimators;
+	estimators.Reserve(nMaxThreads);
+	cList<SEACAVE::Thread> threads;
+	if (nMaxThreads > 1)
+		threads.Resize(nMaxThreads-1); // current thread is also used
+	volatile Thread::safe_t idxPixel;
+
+	// compute confMap
+	{
+		// create working threads
+		idxPixel = -1;
+		ASSERT(estimators.IsEmpty());
+		while (estimators.GetSize() < nMaxThreads)
+			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::RB2LT);
+		ASSERT(estimators.GetSize() == threads.GetSize()+1);
+		FOREACH(i, threads)
+			threads[i].start(ScoreDepthMapTmp, &estimators[i]);
+		ScoreDepthMapTmp(&estimators.Last());
+		// wait for the working threads to close
+		FOREACHPTR(pThread, threads)
+			pThread->join();
+
+		estimators.Release();
+	#if TD_VERBOSE != TD_VERBOSE_OFF
+		// save rough depth map as image
+		if (g_nVerbosityLevel > 4) {
+			ExportDepthMap(ComposeDepthFilePath(idxImage, "score.depth.png"), depthData.depthMap);
+			ExportNormalMap(ComposeDepthFilePath(idxImage, "score.normal.png"), depthData.normalMap);
+			ExportPointCloud(ComposeDepthFilePath(idxImage, "score.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "score.conf.png"), depthData.confMap);
+			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "score.conf.pfm"));
+		}
+	#endif
+	}
+
+	// remove all estimates with too big score and invert confidence map
+	{
+		// create working threads
+		idxPixel = -1;
+		ASSERT(estimators.IsEmpty());
+		while (estimators.GetSize() < nMaxThreads)
+			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::DIRS);
+		ASSERT(estimators.GetSize() == threads.GetSize()+1);
+		FOREACH(i, threads)
+			threads[i].start(EndDepthMapTmp, &estimators[i]);
+		EndDepthMapTmp(&estimators.Last());
+		// wait for the working threads to close
+		FOREACHPTR(pThread, threads)
+			pThread->join();
+		estimators.Release();
+
+	#if TD_VERBOSE != TD_VERBOSE_OFF
+		// save reduce depth map as image
+		if (g_nVerbosityLevel > 4) {
+			ExportDepthMap(ComposeDepthFilePath(idxImage, "reduce.depth.png"), depthData.depthMap);
+			ExportNormalMap(ComposeDepthFilePath(idxImage, "reduce.normal.png"), depthData.normalMap);
+			ExportPointCloud(ComposeDepthFilePath(idxImage, "reduce.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "reduce.conf.png"), depthData.confMap);
+			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "reduce.conf.pfm"));
+		}
+	#endif
+	}
+
+	DEBUG_EXTRA("Depth-map for image %3u %s: %dx%d (%s)", image.pImageData-scene.images.Begin(),
+				depthData.images.GetSize() > 2 ?
+				String::FormatString("estimated using %2u images", depthData.images.GetSize()-1).c_str() :
+				String::FormatString("with image %3u estimated", depthData.images[1].pImageData-scene.images.Begin()).c_str(),
+				size.width, size.height, TD_TIMER_GET_FMT().c_str());
+
+	return true;
+} // GipumaEstimate
+/******************************************************/
 
 DepthMapsData::DepthMapsData(Scene& _scene)
 	:
@@ -772,11 +1016,23 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		// save intermediate depth map as image
 		if (g_nVerbosityLevel > 4) {
 			const String path(ComposeDepthFilePath(image.pImageData-scene.images.Begin(), "iter")+String::ToString(iter));
+			depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "iter.depth.pfm"));
+			depthData.normalMap.Save(ComposeDepthFilePath(idxImage, "iter.normal.pfm"));
 			ExportDepthMap(path+".png", depthData.depthMap);
 			ExportNormalMap(path+".normal.png", depthData.normalMap);
 			ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 		}
 		#endif
+	}
+
+	if (g_nVerbosityLevel > 4) {
+		const String path(ComposeDepthFilePath(image.pImageData-scene.images.Begin(), "iter"));
+		depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "iter.depth.pfm"));
+		depthData.normalMap.Save(ComposeDepthFilePath(idxImage, "iter.normal.pfm"));
+		depthData.confMap.Save(ComposeDepthFilePath(idxImage, "iter.conf.pfm"));
+		ExportDepthMap(path+".png", depthData.depthMap);
+		ExportNormalMap(path+".normal.png", depthData.normalMap);
+		ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 	}
 
 	// remove all estimates with too big score and invert confidence map
@@ -1635,6 +1891,8 @@ bool Scene::DenseReconstruction()
 	data.idxImage = 0;
 	ASSERT(data.events.IsEmpty());
 	data.events.AddEvent(new EVTProcessImage(0));
+    MVS::selectCudaDevice();
+    std::cout << std::endl;
 	// start working threads
 	data.progress = new Util::Progress("Estimated depth-maps", data.images.GetSize());
 	GET_LOGCONSOLE().Pause();
@@ -1778,7 +2036,11 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			// extract depth map
 			data.sem.Wait();
-			data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
+			if (OPTDENSE::algorithm == 1) {
+				data.detphMaps.GipumaEstimate(data.images[evtImage.idxImage]);
+			} else if (OPTDENSE::algorithm == 0) {
+				data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
+			}
 			data.sem.Signal();
 			if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {
 				// optimize depth-map
@@ -1795,8 +2057,10 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			DepthData& depthData(data.detphMaps.arrDepthData[idx]);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
-			if (g_nVerbosityLevel > 3)
+			if (g_nVerbosityLevel > 3) {
 				ExportDepthMap(ComposeDepthFilePath(idx, "raw.png"), depthData.depthMap);
+				depthData.depthMap.Save(ComposeDepthFilePath(idx, "raw.pfm"));
+			}
 			#endif
 			// apply filters
 			if (OPTDENSE::nOptimize & (OPTDENSE::REMOVE_SPECKLES)) {
