@@ -1028,7 +1028,7 @@ __global__ void gipuma_init_cu2(GlobalState &gs)
 
     rndUnitVectorOnHemisphere_cu ( &norm_now, viewVector, &localState );
     disp_now= disparityDepthConversion_cu ( camera.f, camera.baseline, disp_now);
-
+    // disp_now = gs.lines->init_depth[center];
     // Save values
     norm_now.w = getD_cu ( norm_now, p, disp_now,  camera);
     //disp[x] = disp_now;

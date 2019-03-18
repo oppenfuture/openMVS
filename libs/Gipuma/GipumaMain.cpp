@@ -454,6 +454,13 @@ bool runGipuma(const std::vector<cv::Mat_<float>> &images,
         //gs->lines.s = img_grayscale[0].step[0];
         gs->lines->s = cols;
         gs->lines->l = cols;
+        /*
+        for (size_t c=0; c<cols; ++c) {
+            for (size_t r=0; r<rows; ++r) {
+                gs->lines->init_depth[r*cols + c] = depth_map(r, c);
+            }
+        }
+        */
     }
 
     std::vector<cv::Mat > img_grayscale_float_new(numImages);

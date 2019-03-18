@@ -275,16 +275,38 @@ namespace MVS {
 bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 	TD_TIMER_STARTD();
 
-	// initialize depth and normal maps
-	DepthData& depthData(arrDepthData[idxImage]);
-	ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
-	const DepthData::ViewData& image(depthData.images.First());
-	ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
-	const Image8U::Size size(image.image.size());
-	depthData.depthMap.create(size); depthData.depthMap.memset(0);
-	depthData.normalMap.create(size);
-	depthData.confMap.create(size);
-	const unsigned nMaxThreads(scene.nMaxThreads);
+    // initialize depth and normal maps
+    DepthData& depthData(arrDepthData[idxImage]);
+    ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
+    const DepthData::ViewData& image(depthData.images.First());
+    ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
+    const Image8U::Size size(image.image.size());
+    depthData.normalMap.create(size);
+    depthData.confMap.create(size);
+    const unsigned nMaxThreads(scene.nMaxThreads);
+
+    // initialize the depth-map
+    if (OPTDENSE::importReferenceDepth) {
+        // reference depth map already loaded in processimage
+        InitDepthMapWithoutTriangulation(depthData, size);
+    } else {
+        depthData.depthMap.create(size); depthData.depthMap.memset(0);
+        if (OPTDENSE::nMinViewsTrustPoint < 2) {
+            InitDepthMapWithoutTriangulation(depthData, size);
+        } else {
+            // compute rough estimates using the sparse point-cloud
+            InitDepthMap(depthData);
+        }
+    }
+#if TD_VERBOSE != TD_VERBOSE_OFF
+    // save rough depth map as image
+    if (g_nVerbosityLevel > 4) {
+        depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+        ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+        ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+        ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+    }
+#endif
 
 	// run gipuma to estimate depthMap and normalMap
 	{
@@ -2114,6 +2136,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			if (exportDmapOnly)
 				depthData.depthMap.Save(ComposeDepthFilePath(idx, "raw.pfm"));
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
+			ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 			depthData.ReleaseImages();
 			depthData.Release();
 			data.progress->operator++();
