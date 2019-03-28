@@ -60,6 +60,7 @@ unsigned nPixelArea;
 String strParamsFileName;
 int algorithm;
 float fNCCThresholdKeep;
+String strRealsenseFileName;
 } // namespace OPT
 
 // initialize and parse the command line parameters
@@ -74,8 +75,9 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	generic.add_options()
 		("help,h", "produce this help message")
 		("working-folder,w", boost::program_options::value<std::string>(&WORKING_FOLDER), "working directory (default current directory)")
-		("params-file,p", boost::program_options::value<std::string>(&OPT::strParamsFileName)->default_value("params.txt"), "filename containing gipuma parameters")
-		("algorithm,u",boost::program_options::value(&OPT::algorithm)->default_value(1),"use algorithm to estimate depth (0-mvs, 1-gipuma)")
+		("gipuma-params-file,g", boost::program_options::value<std::string>(&OPT::strParamsFileName)->default_value("gipuma_params.txt"), "filename containing gipuma parameters")
+		("realsense-json,r", boost::program_options::value<std::string>(&OPT::strRealsenseFileName)->default_value("realsense.json"), "containing realsense depth-map and params")
+		("algorithm,u",boost::program_options::value(&OPT::algorithm)->default_value(1),"use algorithm to estimate depth (1-mvs, 0-gipuma)")
 		("fNCCThresholdKeep,n",boost::program_options::value(&OPT::fNCCThresholdKeep)->default_value(0.5),"default 0.5")
 		("config-file,c", boost::program_options::value<std::string>(&OPT::strConfigFileName)->default_value(APPNAME _T(".cfg")), "file name containing program options")
 		("archive-type", boost::program_options::value(&OPT::nArchiveType)->default_value(2), "project archive type: 0-text, 1-binary, 2-compressed binary")
@@ -188,6 +190,7 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	OPTDENSE::paramsFile = MAKE_PATH_SAFE(OPT::strParamsFileName);
 	OPTDENSE::algorithm = OPT::algorithm;
 	OPTDENSE::fNCCThresholdKeep = OPT::fNCCThresholdKeep;
+	OPTDENSE::strRealsenseFileName = MAKE_PATH_SAFE(OPT::strRealsenseFileName);
 	if (!bValidConfig)
 		OPTDENSE::oConfig.Save(OPT::strDenseConfigFileName);
 

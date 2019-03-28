@@ -2274,7 +2274,7 @@ inline void _ProcessScanLine(int y, const TPoint3<T>& pa, const TPoint3<T>& pb, 
 	}
 }
 // Raster the given triangle and output the position and depth of each pixel of the triangle;
-// based on "Learning how to write a 3D software engine – Rasterization & Z-Buffering" by Nick (David Rousset)
+// based on "Learning how to write a 3D software engine <96> Rasterization & Z-Buffering" by Nick (David Rousset)
 // http://blogs.msdn.com/b/davrous/archive/2013/06/21/tutorial-part-4-learning-how-to-write-a-3d-software-engine-in-c-ts-or-js-rasterization-amp-z-buffering.aspx
 template <typename TYPE>
 template <typename T, typename PARSER>

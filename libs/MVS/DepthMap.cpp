@@ -101,8 +101,9 @@ MDEFVAR_OPTDENSE_float(fRandomSmoothNormal, "Random Smooth Normal", "Normal vari
 MDEFVAR_OPTDENSE_float(fRandomSmoothBonus, "Random Smooth Bonus", "Score factor used to encourage smoothness (1 - disabled)", "0.9")
 MDEFVAR_OPTDENSE_bool(importReferenceDepth, "Estimate with reference depth", "should we estimate depthmap with reference", "1")
 MDEFVAR_OPTDENSE_uint32(nPixelArea, "half window size", "half windows size around a pixel to be initialize with the known depth", "3")
-MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "params.txt")
-MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "0", "1")
+MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "gipuma_params.txt")
+MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "1", "0")
+MDEFVAR_OPTDENSE_string(strRealsenseFileName, "realsense depth-map and params", "realsense params file", "realsense.json")
 }
 
 

@@ -38,6 +38,7 @@
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/Delaunay_triangulation_2.h>
 #include <CGAL/Projection_traits_xy_3.h>
+#include <nlohmann/json.hpp>
 #include "../Gipuma/GipumaMain.h"
 
 using namespace MVS;
@@ -144,6 +145,7 @@ public:
 
 protected:
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
+    bool InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx);
 
 	static void* STCALL ScoreDepthMapTmp(void*);
 	static void* STCALL EstimateDepthMapTmp(void*);
@@ -267,6 +269,113 @@ namespace MVS {
 		checkCudaErrors(cudaSetDevice(usableDevices[0]));
 		cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024*128);
 	}
+
+	inline std::string GetDir(const std::string& path) {
+		std::size_t botDirPos = path.find_last_of("/");
+		std::string dir = path.substr(0, botDirPos+1);
+
+		return dir;
+	}
+
+	inline std::string GetFile(const std::string& path) {
+		std::size_t botDirPos = path.find_last_of("/");
+		std::string file = path.substr(botDirPos+1, path.size());
+
+		return file;
+	}
+
+    inline std::pair<float,float>& operator+=(std::pair<float,float> &a ,const std::pair<float,float> &b)
+    {
+        a.first += b.first;
+        a.second += b.second;
+
+        return a;
+    }
+
+	inline std::pair<float, float> compute_weight(int x, int y, const TPoint3<float>& p) {
+		float dx_  = p.x - x;
+		float dx = dx_ > 0 ? dx_ : -dx_;
+		float dy_ = p.y - y;
+		float dy = dy_ > 0 ? dy_ : -dy_;
+		return std::make_pair((1-dx)*(1-dy)*p.z, (1-dx)*(1-dy));
+	}
+
+	struct pair_sum : public std::binary_function< std::pair<float,float>, std::pair<float,float>, std::pair<float,float> >
+	{
+		std::pair<float,float> operator()(const std::pair<float,float>& lhs, const std::pair<float,float>& rhs)
+		{
+			return std::pair<float,float>(lhs.first + rhs.first, lhs.second + rhs.second);
+		}
+	};
+
+	inline TPoint3<float> TransformPointI2C(const TPoint3<float>& X, const cv::Matx<float,3,3>& K){
+		return TPoint3<float>(
+				float((X.x-K(0,2))*X.z/K(0,0)),
+				float((X.y-K(1,2))*X.z/K(1,1)),
+				float(X.z));
+	}
+
+	inline TPoint3<float> TransformPointC2W(const TPoint3<float>& X, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C){
+		return R.t() * X + C;
+	}
+
+	inline TPoint3<float> TransformPointI2W(const TPoint3<float>& X, const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C){
+		return TransformPointC2W(TransformPointI2C(X, K), R, C);
+	}
+
+    void InitDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
+        std::vector<TPoint3<float> > image_points;
+        std::vector<TPoint3<float> > world_points;
+        std::vector<TPoint3<float> > rgb_points;
+        const Camera& camera = image.camera;
+
+        for (auto r=0; r<depth_data.depthMap.height(); ++r) {
+            for (auto c=0; c<depth_data.depthMap.width(); ++c) {
+                if (depth_data.depthMap(r, c) != 0) {
+                    image_points.push_back(TPoint3<float>(c, r, depth_data.depthMap(r, c)));
+                }
+            }
+        }
+
+        for (auto itr: image_points) {
+            world_points.push_back(MVS::TransformPointI2W(itr, K, R, C));
+        }
+
+        for (auto itr: world_points) {
+            TPoint3<double> it = itr;
+            TPoint3<double> X = camera.TransformPointW2C(it);
+            TPoint2<float> tmp = camera.TransformPointC2I(X);
+            TPoint3<float> x = TPoint3<float>(tmp.x, tmp.y, X.z);
+            rgb_points.push_back(x);
+        }
+
+        std::vector<std::pair<float, float> > weights(image.width*image.height);
+
+        for (auto itr: rgb_points) {
+            int x0 = int(itr.x);
+            int x1 = int(itr.x) + 1;
+            int y0 = int(itr.y);
+            int y1 = int(itr.y) + 1;
+            if (x0 >= 0 && x1 < image.width-1 && y0 >= 0 && y1 < image.height-1) {
+                int idx = y0 * image.width + x0;
+                weights[idx] += compute_weight(x0, y0, itr);
+                weights[idx + 1] += compute_weight(x1, y0, itr);
+                weights[idx + image.width] += compute_weight(x0, y1, itr);
+                weights[idx + image.width + 1] += compute_weight(x1, y1, itr);
+            }
+        }
+
+        depth_data.depthMap = cv::Mat_<float>::zeros(image.height, image.width);
+
+        for (size_t r = 0; r < image.height; ++r) {
+            for (size_t c = 0; c < image.width; ++c) {
+                std::pair<float, float>  weight = weights[r*image.width+c];
+                if (weight.second != 0) {
+                    depth_data.depthMap(r, c) = weight.first / weight.second;
+                }
+            }
+        }
+    }
 } // namespace MVS
 /****************************************************************/
 
@@ -287,12 +396,11 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-        // reference depth map already loaded in processimage
-        InitDepthMapWithoutTriangulation(depthData, size);
+        InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
         if (OPTDENSE::nMinViewsTrustPoint < 2) {
-            InitDepthMapWithoutTriangulation(depthData, size);
+            InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
         } else {
             // compute rough estimates using the sparse point-cloud
             InitDepthMap(depthData);
@@ -967,12 +1075,11 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 
 	// initialize the depth-map
 	if (OPTDENSE::importReferenceDepth) {
-			// reference depth map already loaded in processimage
-			InitDepthMapWithoutTriangulation(depthData, size);
-	} else {
+        InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
+    } else {
 		depthData.depthMap.create(size); depthData.depthMap.memset(0);
 		if (OPTDENSE::nMinViewsTrustPoint < 2) {
-			InitDepthMapWithoutTriangulation(depthData, size);
+            InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
 		} else {
 			// compute rough estimates using the sparse point-cloud
 			InitDepthMap(depthData);
@@ -2060,10 +2167,6 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				// process next image
 				data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			} else {
-				// load reference depth map for patch match
-				if (OPTDENSE::importReferenceDepth) {
-					depthData.depthMap.Load(images[data.images[evtImage.idxImage]].name + ".ref.pfm");
-				}
 				// estimate depth-map
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
@@ -2075,9 +2178,9 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			// extract depth map
 			data.sem.Wait();
-			if (OPTDENSE::algorithm == 1) {
+			if (OPTDENSE::algorithm == 0) {
 				data.detphMaps.GipumaEstimate(data.images[evtImage.idxImage]);
-			} else if (OPTDENSE::algorithm == 0) {
+			} else if (OPTDENSE::algorithm == 1) {
 				data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
 			}
 			data.sem.Signal();
@@ -2246,4 +2349,47 @@ void Scene::DenseReconstructionFilter(void* pData)
 		}
 	}
 } // DenseReconstructionFilter
+
+bool DepthMapsData::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx) {
+	std::ifstream infile(realsense_filename);
+	if (!infile.good()) {
+		std::cerr << "Failed opening realsense json" << std::endl;
+		return false;
+	}
+	/*
+	realsense.json format:
+	    {
+	        "P1001012.JPG": {
+	            "ref_depth": {
+	                "filename": str,
+	                "intrinsics": list,  // (3x3), row major
+	                "extrinsics": list   // (4*4), list[:3, :3].T = R, list[:3, 3] = C
+	            }
+	        },
+	        ...
+	    }
+	*/
+	auto image_name = GetFile(scene.images[idx].name);
+	nlohmann::json j = nlohmann::json::parse(infile);
+	auto view = j[image_name];
+    auto view_params = view["ref_depth"];
+    auto ref_filename = view_params["filename"];
+    depth_data.depthMap.Load(GetDir(scene.images[idx].name) + ref_filename.get<std::string>());
+
+    std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
+    std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
+    cv::Matx<float,3,3> K;
+    cv::Matx<float,3,3> R;
+    cv::Point3_<float> C(extrinsics[0][3], extrinsics[1][3], extrinsics[2][3]);
+    for (auto i = 0; i < 3; ++i) {
+        for (auto j = 0; j < 3; ++j) {
+            K(i, j) = intrinsics[i][j];
+            R(i, j) = extrinsics[j][i];
+        }
+    }
+    InitDepth(K, R, C, scene.images[idx], depth_data);
+    infile.close();
+
+	return true;
+} // RealSenseToRgb
 /*----------------------------------------------------------------*/

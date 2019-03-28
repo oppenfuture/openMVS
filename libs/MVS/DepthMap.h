@@ -111,6 +111,7 @@ extern bool importReferenceDepth;
 extern unsigned nPixelArea;
 extern String paramsFile;
 extern int algorithm;
+extern String strRealsenseFileName;
 } // namespace OPTDENSE
 /*----------------------------------------------------------------*/
 
