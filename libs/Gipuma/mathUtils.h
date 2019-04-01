@@ -12,11 +12,6 @@
 #endif
 #define M_PI_float    3.14159265358979323846f
 
-//rounding of positive float values
-#if defined(_WIN32)
-float roundf(float val);
-#endif
-
 /* get angle between two vectors in 3D
  * Input: v1,v2 - vectors
  * Output: angle in radian
