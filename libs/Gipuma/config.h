@@ -23,8 +23,9 @@
 #define REFERENCE 0
 #define MAXCOST 1000.0f
 
+#ifndef FORCEINLINE
 #define FORCEINLINE __forceinline__
-//#define FORCEINLINE
+#endif
 
 #define pow2(x) ((x)*(x))
 #define pow3(x) ((x)*(x)*(x))

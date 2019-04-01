@@ -4,13 +4,6 @@
 
 #include "mathUtils.h"
 
-//rounding of positive float values
-#if defined(_WIN32)
-float roundf(float val) {
-	return floor(val + 0.5f);
-}
-#endif
-
 /* get angle between two vectors in 3D
  * Input: v1,v2 - vectors
  * Output: angle in radian
