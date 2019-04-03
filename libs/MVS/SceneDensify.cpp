@@ -143,8 +143,9 @@ public:
 	bool FilterDepthMap(DepthData& depthData, const IIndexArr& idxNeighbors, bool bAdjust=true);
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
-protected:
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
+
+protected:
 
 	static void* STCALL ScoreDepthMapTmp(void*);
 	static void* STCALL EstimateDepthMapTmp(void*);
@@ -374,6 +375,12 @@ namespace MVS {
                 }
             }
         }
+        
+    #if TD_VERBOSE != TD_VERBOSE_OFF
+    	if (g_nVerbosityLevel > 4) {
+        	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-3)+".pfm");
+    	}	
+	#endif
     }
 } // namespace MVS
 /****************************************************************/
@@ -2186,6 +2193,10 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				data.detphMaps.GipumaEstimate(data.images[evtImage.idxImage]);
 			} else if (OPTDENSE::algorithm == 1) {
 				data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
+			} else if (OPTDENSE::algorithm == 2) {
+				DepthData& depthData(data.detphMaps.arrDepthData[data.images[evtImage.idxImage]]);
+				const Image8U::Size size(depthData.images.First().image.size());
+				data.detphMaps.InitDepthMapWithoutTriangulation(depthData, size);
 			}
 			data.sem.Signal();
 			if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {
