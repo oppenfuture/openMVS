@@ -145,7 +145,6 @@ public:
 
 protected:
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
-    bool InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx);
 
 	static void* STCALL ScoreDepthMapTmp(void*);
 	static void* STCALL EstimateDepthMapTmp(void*);
@@ -396,11 +395,12 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-        InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
+        // reference depth map already loaded in processimage
+        InitDepthMapWithoutTriangulation(depthData, size);
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
         if (OPTDENSE::nMinViewsTrustPoint < 2) {
-            InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
+            InitDepthMapWithoutTriangulation(depthData, size);
         } else {
             // compute rough estimates using the sparse point-cloud
             InitDepthMap(depthData);
@@ -1073,18 +1073,19 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	depthData.confMap.create(size);
 	const unsigned nMaxThreads(scene.nMaxThreads);
 
-	// initialize the depth-map
-	if (OPTDENSE::importReferenceDepth) {
-        InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
+    // initialize the depth-map
+    if (OPTDENSE::importReferenceDepth) {
+        // reference depth map already loaded in processimage
+        InitDepthMapWithoutTriangulation(depthData, size);
     } else {
-		depthData.depthMap.create(size); depthData.depthMap.memset(0);
-		if (OPTDENSE::nMinViewsTrustPoint < 2) {
-            InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, idxImage);
-		} else {
-			// compute rough estimates using the sparse point-cloud
-			InitDepthMap(depthData);
-		}
-	}
+        depthData.depthMap.create(size); depthData.depthMap.memset(0);
+        if (OPTDENSE::nMinViewsTrustPoint < 2) {
+            InitDepthMapWithoutTriangulation(depthData, size);
+        } else {
+            // compute rough estimates using the sparse point-cloud
+            InitDepthMap(depthData);
+        }
+    }
 #if TD_VERBOSE != TD_VERBOSE_OFF
     // save rough depth map as image
     if (g_nVerbosityLevel > 4) {
@@ -2168,6 +2169,9 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			} else {
 				// estimate depth-map
+				if (OPTDENSE::importReferenceDepth) {
+                	InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, data.images[evtImage.idxImage]);
+            	}
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
 			break; }
@@ -2350,7 +2354,7 @@ void Scene::DenseReconstructionFilter(void* pData)
 	}
 } // DenseReconstructionFilter
 
-bool DepthMapsData::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx) {
+bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx) {
 	std::ifstream infile(realsense_filename);
 	if (!infile.good()) {
 		std::cerr << "Failed opening realsense json" << std::endl;
@@ -2369,12 +2373,12 @@ bool DepthMapsData::InitDepthMapWithRealsense(DepthData& depth_data, const std::
 	        ...
 	    }
 	*/
-	auto image_name = GetFile(scene.images[idx].name);
+	auto image_name = GetFile(images[idx].name);
 	nlohmann::json j = nlohmann::json::parse(infile);
 	auto view = j[image_name];
     auto view_params = view["ref_depth"];
     auto ref_filename = view_params["filename"];
-    depth_data.depthMap.Load(GetDir(scene.images[idx].name) + ref_filename.get<std::string>());
+    depth_data.depthMap.Load(GetDir(images[idx].name) + ref_filename.get<std::string>());
 
     std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
     std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
@@ -2387,8 +2391,7 @@ bool DepthMapsData::InitDepthMapWithRealsense(DepthData& depth_data, const std::
             R(i, j) = extrinsics[j][i];
         }
     }
-    InitDepth(K, R, C, scene.images[idx], depth_data);
-    infile.close();
+    InitDepth(K, R, C, images[idx], depth_data);
 
 	return true;
 } // RealSenseToRgb

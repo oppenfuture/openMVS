@@ -20,11 +20,11 @@ public:
     {
         cudaMallocManaged (&c,        sizeof(float) * n);
         cudaMallocManaged (&init_depth, sizeof(float) * n);
-        /*cudaMallocManaged (&disp,     sizeof(float) * n);*/
+        // cudaMallocManaged (&disp,     sizeof(float) * n);
         cudaMallocManaged (&norm4,    sizeof(float4) * n);
         memset            (c,      0, sizeof(float) * n);
         memset            (init_depth, 0, sizeof(float) * n);
-        /*memset            (disp,   0, sizeof(float) * n);*/
+        // memset            (disp,   0, sizeof(float) * n);
         memset            (norm4,  0, sizeof(float4) * n);
     }
     ~LineState()
