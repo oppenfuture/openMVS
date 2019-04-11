@@ -23,7 +23,7 @@
 
 //#define CENSUS
 #define SHARED
-//#define NOTEXTURE_CHECK
+#define NOTEXTURE_CHECK
 #define WIN_INCREMENT 2
 
 // uses smaller (but more) kernels, use if windows watchdog is enabled or if you want frequent display updates
@@ -1093,10 +1093,10 @@ __global__ void gipuma_compute_disp (GlobalState &gs)
     // Transform back normal to world coordinate
     matvecmul4 ( gs.cameras->cameras[REFERENCE].R_orig_inv, norm, (&norm_transformed));
     //vecOnHemisphere_cu ( &norm, viewVector );
-    if (gs.lines->c[center] != MAXCOST)
-        norm_transformed.w = getDisparity_cu (norm, norm.w, p, gs.cameras->cameras[REFERENCE] );
-    else
-        norm_transformed.w = 0;
+    //if (gs.lines->c[center] != MAXCOST)
+    norm_transformed.w = getDisparity_cu (norm, norm.w, p, gs.cameras->cameras[REFERENCE] );
+    //else
+    //  norm_transformed.w = 0;
     gs.lines->norm4[center] = norm_transformed;
     return;
 }
@@ -1957,12 +1957,155 @@ void gipuma(GlobalState &gs)
     cudaFree(gs.cs);
 }
 
+// int runcuda(GlobalState &gs)
+// {
+//     //printf("Run cuda\n");
+//     if(gs.params->color_processing)
+//         gipuma<float4>(gs);
+//     else
+//         gipuma<float>(gs);
+//     return 0;
+
+template< typename T >
+void gipumaIterOnce(GlobalState &gs)
+{
+#ifdef SHARED
+    cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+#else
+    cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
+#endif
+    int rows = gs.cameras->rows;
+    int cols = gs.cameras->cols;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    checkCudaErrors(cudaMalloc ( &gs.cs, rows*cols*sizeof( curandState ) ));
+
+    //int SHARED_SIZE_W_host;
+#ifndef SHARED_HARDCODED
+    int blocksize_w = gs.params->box_hsize + 1; // +1 for the gradient computation
+    int blocksize_h = gs.params->box_vsize + 1; // +1 for the gradient computation
+    WIN_RADIUS_W = (blocksize_w) / (2);
+    WIN_RADIUS_H = (blocksize_h) / (2);
+
+    int BLOCK_W = 32;
+    int BLOCK_H = (BLOCK_W/2);
+    TILE_W = BLOCK_W;
+    TILE_H = BLOCK_H * 2;
+    SHARED_SIZE_W_m  = (TILE_W + WIN_RADIUS_W * 2);
+    SHARED_SIZE_H = (TILE_H + WIN_RADIUS_H * 2);
+    SHARED_SIZE = (SHARED_SIZE_W_m * SHARED_SIZE_H);
+    cudaMemcpyToSymbol (SHARED_SIZE_W, &SHARED_SIZE_W_m, sizeof(SHARED_SIZE_W_m));
+    //SHARED_SIZE_W_host = SHARED_SIZE_W_m;
+#else
+    //SHARED_SIZE_W_host = SHARED_SIZE;
+#endif
+    int shared_size_host = SHARED_SIZE;
+
+    dim3 grid_size;
+    grid_size.x=(cols+BLOCK_W-1)/BLOCK_W;
+    grid_size.y=((rows/2)+BLOCK_H-1)/BLOCK_H;
+    dim3 block_size;
+    block_size.x=BLOCK_W;
+    block_size.y=BLOCK_H;
+
+    dim3 grid_size_initrand;
+    grid_size_initrand.x=(cols+16-1)/16;
+    grid_size_initrand.y=(rows+16-1)/16;
+    dim3 block_size_initrand;
+    block_size_initrand.x=16;
+    block_size_initrand.y=16;
+
+    //printf("Launching kernel with grid of size %d %d and block of size %d %d and shared size %d %d\nBlock %d %d and radius %d %d and tile %d %d\n",
+           //grid_size.x,
+           //grid_size.y,
+           //block_size.x,
+           //block_size.y,
+           //SHARED_SIZE_W_host,
+           //SHARED_SIZE_H,
+           //BLOCK_W,
+           //BLOCK_H,
+           //WIN_RADIUS_W,
+           //WIN_RADIUS_H,
+           //TILE_W,
+           //TILE_H
+          //);
+    //printf("Grid size initrand is grid: %d-%d block: %d-%d\n", grid_size_initrand.x, grid_size_initrand.y, block_size_initrand.x, block_size_initrand.y);
+
+    size_t avail;
+    size_t total;
+    cudaMemGetInfo( &avail, &total );
+    size_t used = total - avail;
+    int maxiter=gs.params->iterations;
+    printf("\nDevice memory used: %fMB\n", used/1000000.0f);
+    printf("Blocksize is %dx%d\n", gs.params->box_hsize,gs.params->box_vsize);
+
+    //int shared_memory_size = sizeof(float)  * SHARED_SIZE ;
+    //printf("Computing depth\n");
+    printf("Number of iterations is %d\n", maxiter);
+    printf("\n");
+    //gipuma_init_cu<T><<< (rows + BLOCK_H-1)/BLOCK_H, BLOCK_H>>>(gs);
+    //gipuma_init_random<<< grid_size_initrand, block_size_initrand>>>(gs);
+    gipuma_init_cu2<T><<< grid_size_initrand, block_size_initrand>>>(gs);
+
+    //gipuma_initial_cost<T><<< grid_size_initrand, block_size_initrand>>>(gs);
+    checkCudaErrors(cudaEventRecord(start));
+    //for (int it =0;it<gs.params.iterations; it++)
+#ifdef SMALLKERNEL
+        //spatial propagation of 4 closest neighbors (1px up/down/left/right)
+        gipuma_black_spatialPropClose_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        cudaDeviceSynchronize();
+    #ifdef EXTRAPOINTFAR
+        //spatial propagation of 4 far away neighbors (5px up/down/left/right)
+        gipuma_black_spatialPropFar_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        cudaDeviceSynchronize();
+    #endif
+        //plane refinement
+        gipuma_black_planeRefine_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        cudaDeviceSynchronize();
+
+        //spatial propagation of 4 closest neighbors (1px up/down/left/right)
+        gipuma_red_spatialPropClose_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        cudaDeviceSynchronize();
+    #ifdef EXTRAPOINTFAR
+        //spatial propagation of 4 far away neighbors (5px up/down/left/right)
+        gipuma_red_spatialPropFar_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        cudaDeviceSynchronize();
+    #endif
+        //plane refinement
+        gipuma_red_planeRefine_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        checkCudaErrors(cudaDeviceSynchronize());
+
+#else
+        gipuma_black_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+        gipuma_red_cu<T><<< grid_size, block_size, shared_size_host * sizeof(T)>>>(gs, 0);
+#endif
+    std::cout << std::endl;
+    // compute final depth-map
+    gipuma_compute_disp<<< grid_size_initrand, block_size_initrand>>>(gs);
+
+    cudaDeviceSynchronize();
+    cudaEventRecord(stop);
+
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    std::cout << "\tTotal time needed for computation: " << milliseconds/1000 << " seconds" << std::endl;
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        printf("Error: %s\n", cudaGetErrorString(err));
+
+    cudaFree(gs.cs);
+}
+
 int runcuda(GlobalState &gs)
 {
     //printf("Run cuda\n");
     if(gs.params->color_processing)
-        gipuma<float4>(gs);
+        gipumaIterOnce<float4>(gs);
     else
-        gipuma<float>(gs);
+        gipumaIterOnce<float>(gs);
     return 0;
 }
