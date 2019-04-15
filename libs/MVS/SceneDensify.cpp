@@ -285,22 +285,6 @@ namespace MVS {
 		return file;
 	}
 
-    inline std::pair<float,float>& operator+=(std::pair<float,float> &a ,const std::pair<float,float> &b)
-    {
-        a.first += b.first;
-        a.second += b.second;
-
-        return a;
-    }
-
-	inline std::pair<float, float> compute_weight(int x, int y, const TPoint3<float>& p) {
-		float dx_  = p.x - x;
-		float dx = dx_ > 0 ? dx_ : -dx_;
-		float dy_ = p.y - y;
-		float dy = dy_ > 0 ? dy_ : -dy_;
-		return std::make_pair((1-dx)*(1-dy)*p.z, (1-dx)*(1-dy));
-	}
-
 	struct pair_sum : public std::binary_function< std::pair<float,float>, std::pair<float,float>, std::pair<float,float> >
 	{
 		std::pair<float,float> operator()(const std::pair<float,float>& lhs, const std::pair<float,float>& rhs)
@@ -324,65 +308,85 @@ namespace MVS {
 		return TransformPointC2W(TransformPointI2C(X, K), R, C);
 	}
 
-    void InitDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
-        std::vector<TPoint3<float> > image_points;
-        std::vector<TPoint3<float> > world_points;
-        std::vector<TPoint3<float> > rgb_points;
-        const Camera& camera = image.camera;
-
-        for (auto r=0; r<depth_data.depthMap.height(); ++r) {
-            for (auto c=0; c<depth_data.depthMap.width(); ++c) {
-                if (depth_data.depthMap(r, c) != 0) {
-                    image_points.push_back(TPoint3<float>(c, r, depth_data.depthMap(r, c)));
-                }
-            }
-        }
-
-        for (auto itr: image_points) {
-            world_points.push_back(MVS::TransformPointI2W(itr, K, R, C));
-        }
-
-        for (auto itr: world_points) {
-            TPoint3<double> it = itr;
-            TPoint3<double> X = camera.TransformPointW2C(it);
-            TPoint2<float> tmp = camera.TransformPointC2I(X);
-            TPoint3<float> x = TPoint3<float>(tmp.x, tmp.y, X.z);
-            rgb_points.push_back(x);
-        }
-
-        std::vector<std::pair<float, float> > weights(image.width*image.height);
-
-        for (auto itr: rgb_points) {
-            int x0 = int(itr.x);
-            int x1 = int(itr.x) + 1;
-            int y0 = int(itr.y);
-            int y1 = int(itr.y) + 1;
-            if (x0 >= 0 && x1 < image.width-1 && y0 >= 0 && y1 < image.height-1) {
-                int idx = y0 * image.width + x0;
-                weights[idx] += compute_weight(x0, y0, itr);
-                weights[idx + 1] += compute_weight(x1, y0, itr);
-                weights[idx + image.width] += compute_weight(x0, y1, itr);
-                weights[idx + image.width + 1] += compute_weight(x1, y1, itr);
-            }
-        }
-
-        depth_data.depthMap = cv::Mat_<float>::zeros(image.height, image.width);
-
-        for (size_t r = 0; r < image.height; ++r) {
-            for (size_t c = 0; c < image.width; ++c) {
-                std::pair<float, float>  weight = weights[r*image.width+c];
-                if (weight.second != 0) {
-                    depth_data.depthMap(r, c) = weight.first / weight.second;
-                }
-            }
-        }
-        
-    #if TD_VERBOSE != TD_VERBOSE_OFF
-    	if (g_nVerbosityLevel > 4) {
-        	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-3)+".pfm");
-    	}	
-	#endif
+  void UpdateZ(int x, int y, int width, int height, const TPoint3<float>& pt,
+    std::vector<float> &weights, std::vector<float> &z_vals, std::vector<float> &z_buffer) {
+    if (x < 0 || x >= width || y < 0 || y >= height)
+      return;
+    float epsilon = 0.05f; // 5cm
+    int idx = x + y * width;
+    if (pt.z > z_buffer[idx] + epsilon) {
+      // point farther from view then z_buffer should be ignore
+      return;
+    } else if (pt.z + epsilon < z_buffer[idx]) {
+      // update z_buffer with closer point, and clear z_vals and weights;
+      z_buffer[idx] = pt.z;
+      z_vals[idx] = 0.f;
+      weights[idx] = 0.f;
     }
+    float w = std::fabs(pt.x - x) * std::fabs(pt.y - y);
+    weights[idx] += w;
+    z_vals[idx] += w * pt.z;
+  }
+
+  void InitDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
+    std::vector<TPoint3<float> > image_points;
+    std::vector<TPoint3<float> > world_points;
+    std::vector<TPoint3<float> > rgb_points;
+    const Camera& camera = image.camera;
+
+    for (auto r=0; r<depth_data.depthMap.height(); ++r) {
+      for (auto c=0; c<depth_data.depthMap.width(); ++c) {
+        if (depth_data.depthMap(r, c) != 0) {
+          image_points.push_back(TPoint3<float>(c, r, depth_data.depthMap(r, c)));
+        }
+      }
+    }
+
+    for (auto &itr: image_points) {
+      world_points.push_back(MVS::TransformPointI2W(itr, K, R, C));
+    }
+
+    for (auto &itr: world_points) {
+      TPoint3<double> it = itr;
+      TPoint3<double> X = camera.TransformPointW2C(it);
+      TPoint2<float> tmp = camera.TransformPointC2I(X);
+      TPoint3<float> x = TPoint3<float>(tmp.x, tmp.y, X.z);
+      rgb_points.push_back(x);
+    }
+
+    std::vector<float> weights(image.width*image.height, 0.f);
+    std::vector<float> z_vals(image.width * image.height, 0.f);
+    std::vector<float> z_buffer(image.width * image.height, 1000.f);
+
+
+    for (auto &pt: rgb_points) {
+      int x0 = int(pt.x);
+      int x1 = x0 + 1;
+      int y0 = int(pt.y);
+      int y1 = y0 + 1;
+      UpdateZ(x0, y0, image.width, image.height, pt, weights, z_vals, z_buffer);
+      UpdateZ(x1, y0, image.width, image.height, pt, weights, z_vals, z_buffer);
+      UpdateZ(x0, y1, image.width, image.height, pt, weights, z_vals, z_buffer);
+      UpdateZ(x1, y1, image.width, image.height, pt, weights, z_vals, z_buffer);
+    }
+
+    depth_data.depthMap = cv::Mat_<float>::zeros(image.height, image.width);
+
+    for (size_t r = 0; r < image.height; ++r) {
+      for (size_t c = 0; c < image.width; ++c) {
+        int idx = r * image.width + c;
+        if (weights[idx] > 0) {
+          depth_data.depthMap(r, c) = z_vals[idx] / weights[idx];
+        }
+      }
+    }
+      
+  #if TD_VERBOSE != TD_VERBOSE_OFF
+  	if (g_nVerbosityLevel > 4) {
+    	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-3)+".pfm");
+  	}	
+#endif
+  }
 } // namespace MVS
 /****************************************************************/
 
@@ -558,11 +562,12 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
 		// cv::Mat_<float> depth_map;
 		cv::Mat_<cv::Point3_<float>> normal_map(depthData.normalMap.rows, depthData.normalMap.cols);
+    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
 		for (int  iter = 0; iter < 8; ++iter) {
-			const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-			depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
 			GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax,
 					   OPTDENSE::paramsFile.c_str());
+      const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+      depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
 		}
 		// depthData.depthMap = depth_map;
 		depthData.normalMap = TransformTImage(normal_map);
