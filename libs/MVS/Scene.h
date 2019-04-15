@@ -59,6 +59,10 @@ public:
 	unsigned nMaxThreads; // maximum number of threads used to distribute the work load
 	bool exportDmapOnly;
 
+	cv::Matx<float,3,3> useK;
+    cv::Matx<float,3,3> useR;
+    cv::Point3_<float> useC;
+
 public:
 	inline Scene(unsigned _nMaxThreads=0, bool _exportDmapOnly=false) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)),exportDmapOnly(_exportDmapOnly){}
 

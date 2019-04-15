@@ -554,7 +554,6 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 		int numberOfImages = depthData.images.GetSize();
 		std::vector<cv::Mat_<float>> images(numberOfImages);
 		std::vector<cv::Mat_<float>> projection_matrices(numberOfImages);
-
 		for (int i = 0; i < numberOfImages; ++i) {
 			images[i] = depthData.images[i].image;
 			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
@@ -562,13 +561,15 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
 		// cv::Mat_<float> depth_map;
 		cv::Mat_<cv::Point3_<float>> normal_map(depthData.normalMap.rows, depthData.normalMap.cols);
-    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+    	depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
 		for (int  iter = 0; iter < 8; ++iter) {
 			GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax,
 					   OPTDENSE::paramsFile.c_str());
-      const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-      depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
+      		const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+      		depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
 		}
+		
+		// GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax, OPTDENSE::paramsFile.c_str());
 		// depthData.depthMap = depth_map;
 		depthData.normalMap = TransformTImage(normal_map);
 
@@ -2511,6 +2512,7 @@ bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& 
 	        ...
 	    }
 	*/
+
 	auto image_name = GetFile(images[idx].name);
 	nlohmann::json j = nlohmann::json::parse(infile);
 	auto view = j[image_name];
@@ -2522,6 +2524,12 @@ bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& 
     std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
     cv::Matx<float,3,3> K;
     cv::Matx<float,3,3> R;
+
+    if (view['extrinsics'].empty()) {
+    	InitDepth(useK, useR, useC, images[0], depth_data);
+    	return true;
+    }
+
     cv::Point3_<float> C(extrinsics[0][3], extrinsics[1][3], extrinsics[2][3]);
     for (auto i = 0; i < 3; ++i) {
         for (auto j = 0; j < 3; ++j) {
@@ -2529,6 +2537,13 @@ bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& 
             R(i, j) = extrinsics[j][i];
         }
     }
+
+    if (idx == 0) {
+    	useK = K;
+    	useR = R;
+    	useC = C;
+    }
+
     InitDepth(K, R, C, images[idx], depth_data);
 
 	return true;

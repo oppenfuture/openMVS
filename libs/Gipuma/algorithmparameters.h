@@ -48,7 +48,7 @@ struct AlgorithmParameters : public Managed{
         depthMax           (-1.0f), // CUDA
         min_angle          (5.0f), // CUDA
         max_angle          (45.0f), // CUDA
-        no_texture_sim     (0.998f), // CUDA
+        no_texture_sim     (0.997f), // CUDA
         no_texture_per     (0.7f), // CUDA
         max_views          (9) {}
     int algorithm; // algorithm cost type
