@@ -145,6 +145,7 @@ public:
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
+	bool InitDepthMapWithRealsense(const std::string& realsense_filename, IIndex idx);
 
 protected:
 
@@ -417,6 +418,7 @@ bool DepthMapsData::NoPatchMatch(IIndex idxImage) {
             InitDepthMap(depthData);
         }
     }
+
 #if TD_VERBOSE != TD_VERBOSE_OFF
     // save rough depth map as image
     if (g_nVerbosityLevel > 4) {
@@ -539,6 +541,7 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
             InitDepthMap(depthData);
         }
     }
+
 #if TD_VERBOSE != TD_VERBOSE_OFF
     // save rough depth map as image
     if (g_nVerbosityLevel > 4) {
@@ -1223,6 +1226,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
             InitDepthMap(depthData);
         }
     }
+
 #if TD_VERBOSE != TD_VERBOSE_OFF
     // save rough depth map as image
     if (g_nVerbosityLevel > 4) {
@@ -2173,6 +2177,8 @@ bool Scene::DenseReconstruction()
 	data.events.AddEvent(new EVTProcessImage(0));
     MVS::selectCudaDevice();
     std::cout << std::endl;
+
+    data.scene.GetUseKRC(OPTDENSE::strRealsenseFileName);
 	// start working threads
 	data.progress = new Util::Progress("Estimated depth-maps", data.images.GetSize());
 	GET_LOGCONSOLE().Pause();
@@ -2307,7 +2313,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			} else {
 				// estimate depth-map
 				if (OPTDENSE::importReferenceDepth) {
-                	InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, data.images[evtImage.idxImage]);
+                	data.detphMaps.InitDepthMapWithRealsense(OPTDENSE::strRealsenseFileName, data.images[evtImage.idxImage]);
             	}
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
@@ -2493,7 +2499,7 @@ void Scene::DenseReconstructionFilter(void* pData)
 	}
 } // DenseReconstructionFilter
 
-bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx) {
+bool DepthMapsData::InitDepthMapWithRealsense(const std::string& realsense_filename, IIndex idx) {
 	std::ifstream infile(realsense_filename);
 	if (!infile.good()) {
 		std::cerr << "Failed opening realsense json" << std::endl;
@@ -2513,20 +2519,21 @@ bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& 
 	    }
 	*/
 
-	auto image_name = GetFile(images[idx].name);
+	auto image_name = GetFile(scene.images[idx].name);
 	nlohmann::json j = nlohmann::json::parse(infile);
 	auto view = j[image_name];
     auto view_params = view["ref_depth"];
     auto ref_filename = view_params["filename"];
-    depth_data.depthMap.Load(GetDir(images[idx].name) + ref_filename.get<std::string>());
+    arrDepthData[idx].depthMap.Load(GetDir(scene.images[idx].name) + ref_filename.get<std::string>());
 
     std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
     std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
     cv::Matx<float,3,3> K;
     cv::Matx<float,3,3> R;
 
-    if (view['extrinsics'].empty()) {
-    	InitDepth(useK, useR, useC, images[0], depth_data);
+    if (view_params["extrinsics"].empty()) {
+    	InitDepth(scene.useK, scene.useR, scene.useC, scene.images[scene.HaveUse], arrDepthData[idx]);
+
     	return true;
     }
 
@@ -2538,14 +2545,40 @@ bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& 
         }
     }
 
-    if (idx == 0) {
-    	useK = K;
-    	useR = R;
-    	useC = C;
-    }
-
-    InitDepth(K, R, C, images[idx], depth_data);
+    InitDepth(K, R, C, scene.images[idx], arrDepthData[idx]);
 
 	return true;
 } // RealSenseToRgb
+
+void Scene::GetUseKRC(const std::string realsense_json) {
+	std::ifstream infile(realsense_json);
+	nlohmann::json j = nlohmann::json::parse(infile);
+	for (auto &el : j.items()) {
+		auto &key = el.key();
+		auto &view = el.value();
+		if (!view["ref_depth"]["extrinsics"].empty()) {
+			std::vector<std::vector<float> > intrinsics = view["ref_depth"]["intrinsics"];
+    		std::vector<std::vector<float> > extrinsics = view["ref_depth"]["extrinsics"];
+			cv::Matx<float,3,3> K;
+    		cv::Matx<float,3,3> R;
+    		cv::Point3_<float> C(extrinsics[0][3], extrinsics[1][3], extrinsics[2][3]);
+    		for (auto i = 0; i < 3; ++i) {
+        		for (auto j = 0; j < 3; ++j) {
+            		K(i, j) = intrinsics[i][j];
+            		R(i, j) = extrinsics[j][i];
+        		}
+    		}
+    		useK = K;
+    		useR = R;
+    		useC = C;
+
+    		for (IIndex id; id < images.GetSize(); ++id) {
+    			if (images[id].name == key) {
+    				HaveUse = id;
+    			}
+    		}
+    		break;
+		}
+	}
+}
 /*----------------------------------------------------------------*/

@@ -914,7 +914,7 @@ __device__ FORCEINLINE void getRndDispAndUnitVector_cu (
 
     float minDepth = maxDepth - 0.005;
     unsigned int randNum = ceilf(curand_uniform(cs) * 100);
-    if (randNum == 0) {
+    if (randNum % 2 == 0) {
         float tmp = minDepth;
         minDepth = -min (maxDepth, disp);
         maxDepth = -min (tmp, disp);
@@ -959,7 +959,7 @@ __device__ FORCEINLINE static void planeRefinement_cu (
     float costTempL;
 
     float baseline = camParams.cameras[0].baseline;
-    float depth_ranges[6] = {0.005, 0.010, 0.015, 0.020, 0.025, 030};
+    float depth_ranges[6] = {0.005, 0.010, 0.015, 0.020, 0.025, 0.030};
 
     for (size_t i=0; i < 6; ++i) {
         getRndDispAndUnitVector_cu (

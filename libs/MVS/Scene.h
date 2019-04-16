@@ -62,6 +62,7 @@ public:
 	cv::Matx<float,3,3> useK;
     cv::Matx<float,3,3> useR;
     cv::Point3_<float> useC;
+    IIndex HaveUse;
 
 public:
 	inline Scene(unsigned _nMaxThreads=0, bool _exportDmapOnly=false) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)),exportDmapOnly(_exportDmapOnly){}
@@ -83,7 +84,7 @@ public:
 	bool ExportCamerasMLP(const String& fileName, const String& fileNameScene) const;
 
 	// Dense reconstruction
-    bool InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx);
+	void GetUseKRC(const std::string realsense_json);
 	bool DenseReconstruction();
 	void DenseReconstructionEstimate(void*);
 	void DenseReconstructionFilter(void*);
