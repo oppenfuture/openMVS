@@ -145,6 +145,7 @@ public:
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
+  bool InitDepthMapByNeighbour(DepthData& depthData, const std::string& realsense_filename, const Image &image);
 
 protected:
 
@@ -190,87 +191,6 @@ namespace MVS {
 		return out;
 	}
 
-	const char *_cudaGetErrorEnum(cudaError_t error)
-	{
-		switch (error)
-		{
-			case cudaSuccess:
-				return "cudaSuccess";
-
-			case cudaErrorInvalidDeviceFunction:
-				return "cudaErrorInvalidDeviceFunction";
-
-			case cudaErrorInvalidDevice:
-				return "cudaErrorInvalidDevice";
-
-			case cudaErrorUnknown:
-				return "cudaErrorUnknown";
-
-			case cudaErrorNoDevice:
-				return "cudaErrorNoDevice";
-
-			case cudaErrorDevicesUnavailable:
-				return "cudaErrorDevicesUnavailable";
-		}
-
-		return "<unknown>";
-	}
-
-	template< typename T >
-	void check(T result, char const *const func, const char *const file, int const line)
-	{
-		if (result)
-		{
-			fprintf(stderr, "CUDA error at %s:%d code=%d(%s) \"%s\" \n",
-					file, line, static_cast<unsigned int>(result), _cudaGetErrorEnum(result), func);
-			cudaDeviceReset();
-			// Make sure we call CUDA Device Reset before exiting
-					exit(EXIT_FAILURE);
-		}
-	}
-
-	template< typename T >
-	void checkCudaErrors(T val) {
-		check(val, cudaGetErrorString(val), __FILE__, __LINE__ );
-	}
-
-
-	void selectCudaDevice ()
-	{
-		int deviceCount = 0;
-		checkCudaErrors(cudaGetDeviceCount(&deviceCount));
-		if (deviceCount == 0) {
-			fprintf(stderr, "There is no cuda capable device!\n");
-			exit(EXIT_FAILURE);
-		}
-		std::cout << std::endl << "Detected " << deviceCount << " devices!" << std::endl;
-		std::vector<int> usableDevices;
-		std::vector<std::string> usableDeviceNames;
-		for (int i = 0; i < deviceCount; i++) {
-			cudaDeviceProp prop;
-			if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) {
-				if (prop.major >= 3 && prop.minor >= 0) {
-					usableDevices.push_back(i);
-					usableDeviceNames.push_back(std::string(prop.name));
-				} else {
-					std::cout << "CUDA capable device " << std::string(prop.name)
-							  << " is only compute cabability " << prop.major << '.'
-							  << prop.minor << std::endl;
-				}
-			} else {
-				std::cout << "Could not check device properties for one of the cuda "
-							 "devices!" << std::endl;
-			}
-		}
-		if(usableDevices.empty()) {
-			fprintf(stderr, "There is no cuda device supporting gipuma!\n");
-			exit(EXIT_FAILURE);
-		}
-		std::cout << "Detected gipuma compatible device: " << usableDeviceNames[0] << std::endl;;
-		checkCudaErrors(cudaSetDevice(usableDevices[0]));
-		cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024*128);
-	}
-
 	inline std::string GetDir(const std::string& path) {
 		std::size_t botDirPos = path.find_last_of("/");
 		std::string dir = path.substr(0, botDirPos+1);
@@ -284,14 +204,6 @@ namespace MVS {
 
 		return file;
 	}
-
-	struct pair_sum : public std::binary_function< std::pair<float,float>, std::pair<float,float>, std::pair<float,float> >
-	{
-		std::pair<float,float> operator()(const std::pair<float,float>& lhs, const std::pair<float,float>& rhs)
-		{
-			return std::pair<float,float>(lhs.first + rhs.first, lhs.second + rhs.second);
-		}
-	};
 
 	inline TPoint3<float> TransformPointI2C(const TPoint3<float>& X, const cv::Matx<float,3,3>& K){
 		return TPoint3<float>(
@@ -516,37 +428,40 @@ bool DepthMapsData::NoPatchMatch(IIndex idxImage) {
 bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 	TD_TIMER_STARTD();
 
-    // initialize depth and normal maps
-    DepthData& depthData(arrDepthData[idxImage]);
-    ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
-    const DepthData::ViewData& image(depthData.images.First());
-    ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
-    const Image8U::Size size(image.image.size());
-    depthData.normalMap.create(size);
-    depthData.confMap.create(size);
-    const unsigned nMaxThreads(scene.nMaxThreads);
+  // initialize depth and normal maps
+  DepthData& depthData(arrDepthData[idxImage]);
+  ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
+  const DepthData::ViewData& image(depthData.images.First());
+  ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
+  const Image8U::Size size(image.image.size());
+  depthData.normalMap.create(size);
+  depthData.confMap.create(size);
+  const unsigned nMaxThreads(scene.nMaxThreads);
 
-    // initialize the depth-map
-    if (OPTDENSE::importReferenceDepth) {
-        // reference depth map already loaded in processimage
+  // initialize the depth-map
+  if (OPTDENSE::importReferenceDepth) {
+    // reference depth map already loaded in processimage
+    if (depthData.depthMap.empty()) {
+      depthData.depthMap.create(size); depthData.depthMap.memset(0);
+      InitDepthMapWithoutTriangulation(depthData, size);
+    }
+  } else {
+      depthData.depthMap.create(size); depthData.depthMap.memset(0);
+      if (OPTDENSE::nMinViewsTrustPoint < 2) {
         InitDepthMapWithoutTriangulation(depthData, size);
-    } else {
-        depthData.depthMap.create(size); depthData.depthMap.memset(0);
-        if (OPTDENSE::nMinViewsTrustPoint < 2) {
-            InitDepthMapWithoutTriangulation(depthData, size);
-        } else {
-            // compute rough estimates using the sparse point-cloud
-            InitDepthMap(depthData);
-        }
-    }
+      } else {
+        // compute rough estimates using the sparse point-cloud
+        InitDepthMap(depthData);
+      }
+  }
 #if TD_VERBOSE != TD_VERBOSE_OFF
-    // save rough depth map as image
-    if (g_nVerbosityLevel > 4) {
-        depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-        ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-        ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-        ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-    }
+  // save rough depth map as image
+  if (g_nVerbosityLevel > 4) {
+    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+    ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+    ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+    ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+  }
 #endif
 
 	// run gipuma to estimate depthMap and normalMap
@@ -554,25 +469,28 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 		int numberOfImages = depthData.images.GetSize();
 		std::vector<cv::Mat_<float>> images(numberOfImages);
 		std::vector<cv::Mat_<float>> projection_matrices(numberOfImages);
-
 		for (int i = 0; i < numberOfImages; ++i) {
 			images[i] = depthData.images[i].image;
 			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
 		}
 
 		// cv::Mat_<float> depth_map;
-		cv::Mat_<cv::Point3_<float>> normal_map(depthData.normalMap.rows, depthData.normalMap.cols);
     depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-		for (int  iter = 0; iter < 8; ++iter) {
-			GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax,
-					   OPTDENSE::paramsFile.c_str());
-      const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+		for (int  iter = 0; iter < 1; ++iter) {
+  		cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap;
+			gipuma::GipumaMain(images, projection_matrices, depthData.depthMap,
+        normal_map, depthData.dMin, depthData.dMax,
+				OPTDENSE::paramsFile.c_str());
+    	const String path(ComposeDepthFilePath(idxImage, "gipuma"));
       depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
+		  depthData.normalMap = TransformTImage(normal_map);
 		}
+		
+		// GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax, OPTDENSE::paramsFile.c_str());
 		// depthData.depthMap = depth_map;
-		depthData.normalMap = TransformTImage(normal_map);
 
-	#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
+
+#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
 		if (g_nVerbosityLevel > 4) {
 			const String path(ComposeDepthFilePath(idxImage, "gipuma"));
@@ -584,7 +502,7 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 							 depthData.normalMap);
 			ExportConfidenceMap(path + ".conf.png", depthData.confMap);
 		}
-	#endif
+#endif
 	}
 
 	// init integral images and index to image-ref map for the reference data
@@ -1070,6 +988,60 @@ bool DepthMapsData::InitDepthMap(DepthData& depthData)
 } // InitDepthMap
 /*----------------------------------------------------------------*/
 
+bool DepthMapsData::InitDepthMapByNeighbour(DepthData& depthData, const std::string& realsense_filename, const Image& image) {
+  std::ifstream infile(realsense_filename);
+  if (!infile.good()) {
+    std::cerr << "Failed opening realsense json" << std::endl;
+    return false;
+  }
+  /*
+  realsense.json format:
+      {
+          "P1001012.JPG": {
+              "ref_depth": {
+                  "filename": str,
+                  "intrinsics": list,  // (3x3), row major
+                  "extrinsics": list   // (4*4), list[:3, :3].T = R, list[:3, 3] = C
+              }
+          },
+          ...
+      }
+  */
+  auto image_name = GetFile(image.name);
+  nlohmann::json j = nlohmann::json::parse(infile);
+  auto view = j[image_name];
+  auto view_params = view["ref_depth"];
+  auto ref_filename = view_params["filename"];
+  depthData.depthMap.Load(GetDir(image.name) + ref_filename.get<std::string>());
+
+  std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
+  std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
+  if (intrinsics.empty())
+    intrinsics = {
+      {1383.5141750796581, 0.0, 960.0},
+      {0.0, 1383.5141750796581, 540.0},
+      {0.0, 0.0, 1.0}
+    };
+  if (extrinsics.empty())
+    extrinsics = {
+      {1, 0, 0, 0},
+      {0, 1, 0, 0},
+      {0, 0, 1, 0},
+      {0, 0, 0, 1},
+    };
+  cv::Matx<float,3,3> K;
+  cv::Matx<float,3,3> R;
+  cv::Point3_<float> C(extrinsics[0][3], extrinsics[1][3], extrinsics[2][3]);
+  for (auto i = 0; i < 3; ++i) {
+    for (auto j = 0; j < 3; ++j) {
+      K(i, j) = intrinsics[i][j];
+      R(i, j) = extrinsics[j][i];
+    }
+  }
+  InitDepth(K, R, C, image, depthData);
+
+  return true;
+} // RealSenseToRgb
 
 // initialize the confidence map (NCC score map) with the score of the current estimates
 void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
@@ -2133,45 +2105,46 @@ bool Scene::DenseReconstruction()
 		TD_TIMER_START();
 		// for each image, find all useful neighbor views
 		IIndexArr invalidIDs;
-		#ifdef DENSE_USE_OPENMP
-		#pragma omp parallel for shared(data, invalidIDs)
+#ifdef DENSE_USE_OPENMP
+#pragma omp parallel for shared(data, invalidIDs)
 		for (int_t ID=0; ID<(int_t)data.images.GetSize(); ++ID) {
 			const IIndex idx((IIndex)ID);
-		#else
-		FOREACH(idx, data.images) {
-		#endif
-			const IIndex idxImage(data.images[idx]);
-			ASSERT(imagesMap[idxImage] != NO_ID);
-			DepthData& depthData(data.detphMaps.arrDepthData[idxImage]);
-			if (!data.detphMaps.SelectViews(depthData)) {
-				#ifdef DENSE_USE_OPENMP
-				#pragma omp critical
-				#endif
-				invalidIDs.InsertSort(idx);
-			}
-		}
-		RFOREACH(i, invalidIDs) {
-			const IIndex idx(invalidIDs[i]);
-			imagesMap[data.images.Last()] = idx;
-			imagesMap[data.images[idx]] = NO_ID;
-			data.images.RemoveAt(idx);
-		}
-		// globally select a target view for each reference image
-		if (OPTDENSE::nNumViews == 1 && !data.detphMaps.SelectViews(data.images, imagesMap, data.neighborsMap)) {
-			VERBOSE("error: no valid images to be dense reconstructed");
-			return false;
-		}
-		ASSERT(!data.images.IsEmpty());
-		VERBOSE("Selecting images for dense reconstruction completed: %d images (%s)", data.images.GetSize(), TD_TIMER_GET_FMT().c_str());
-	}
+#else
+  		FOREACH(idx, data.images) {
+#endif
+  			const IIndex idxImage(data.images[idx]);
+  			ASSERT(imagesMap[idxImage] != NO_ID);
+  			DepthData& depthData(data.detphMaps.arrDepthData[idxImage]);
+  			if (!data.detphMaps.SelectViews(depthData)) {
+#ifdef DENSE_USE_OPENMP
+#pragma omp critical
+#endif
+  				invalidIDs.InsertSort(idx);
+  			}
+  		}
+  		RFOREACH(i, invalidIDs) {
+  			const IIndex idx(invalidIDs[i]);
+  			imagesMap[data.images.Last()] = idx;
+  			imagesMap[data.images[idx]] = NO_ID;
+  			data.images.RemoveAt(idx);
+  		}
+  		// globally select a target view for each reference image
+  		if (OPTDENSE::nNumViews == 1 && !data.detphMaps.SelectViews(data.images, imagesMap, data.neighborsMap)) {
+  			VERBOSE("error: no valid images to be dense reconstructed");
+  			return false;
+  		}
+  		ASSERT(!data.images.IsEmpty());
+  		VERBOSE("Selecting images for dense reconstruction completed: %d images (%s)", data.images.GetSize(), TD_TIMER_GET_FMT().c_str());
+  	}
 	}
 
 	// initialize the queue of images to be processed
 	data.idxImage = 0;
 	ASSERT(data.events.IsEmpty());
 	data.events.AddEvent(new EVTProcessImage(0));
-    MVS::selectCudaDevice();
-    std::cout << std::endl;
+  if (OPTDENSE::algorithm == 0) {
+    gipuma::selectCudaDevice();
+  }
 	// start working threads
 	data.progress = new Util::Progress("Estimated depth-maps", data.images.GetSize());
 	GET_LOGCONSOLE().Pause();
@@ -2306,8 +2279,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			} else {
 				// estimate depth-map
 				if (OPTDENSE::importReferenceDepth) {
-                	InitDepthMapWithRealsense(depthData, OPTDENSE::strRealsenseFileName, data.images[evtImage.idxImage]);
-            	}
+          data.detphMaps.InitDepthMapByNeighbour(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
+        }
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
 			break; }
@@ -2492,45 +2465,4 @@ void Scene::DenseReconstructionFilter(void* pData)
 	}
 } // DenseReconstructionFilter
 
-bool Scene::InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx) {
-	std::ifstream infile(realsense_filename);
-	if (!infile.good()) {
-		std::cerr << "Failed opening realsense json" << std::endl;
-		return false;
-	}
-	/*
-	realsense.json format:
-	    {
-	        "P1001012.JPG": {
-	            "ref_depth": {
-	                "filename": str,
-	                "intrinsics": list,  // (3x3), row major
-	                "extrinsics": list   // (4*4), list[:3, :3].T = R, list[:3, 3] = C
-	            }
-	        },
-	        ...
-	    }
-	*/
-	auto image_name = GetFile(images[idx].name);
-	nlohmann::json j = nlohmann::json::parse(infile);
-	auto view = j[image_name];
-    auto view_params = view["ref_depth"];
-    auto ref_filename = view_params["filename"];
-    depth_data.depthMap.Load(GetDir(images[idx].name) + ref_filename.get<std::string>());
-
-    std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
-    std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
-    cv::Matx<float,3,3> K;
-    cv::Matx<float,3,3> R;
-    cv::Point3_<float> C(extrinsics[0][3], extrinsics[1][3], extrinsics[2][3]);
-    for (auto i = 0; i < 3; ++i) {
-        for (auto j = 0; j < 3; ++j) {
-            K(i, j) = intrinsics[i][j];
-            R(i, j) = extrinsics[j][i];
-        }
-    }
-    InitDepth(K, R, C, images[idx], depth_data);
-
-	return true;
-} // RealSenseToRgb
 /*----------------------------------------------------------------*/

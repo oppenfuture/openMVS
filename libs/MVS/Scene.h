@@ -79,7 +79,6 @@ public:
 	bool ExportCamerasMLP(const String& fileName, const String& fileNameScene) const;
 
 	// Dense reconstruction
-    bool InitDepthMapWithRealsense(DepthData& depth_data, const std::string& realsense_filename, IIndex idx);
 	bool DenseReconstruction();
 	void DenseReconstructionEstimate(void*);
 	void DenseReconstructionFilter(void*);

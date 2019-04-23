@@ -28,6 +28,8 @@ SET(LIBGIPUMA_SRC
     main.h
     mathUtils.cpp
     gipuma.cu
-    GipumaMain.cpp)
+    GipumaMain.cpp
+    fileIoUtils.cpp
+    fileIoUtils.h)
 
 ADD_LIBRARY(gipuma STATIC ${LIBGIPUMA_SRC})

@@ -37,6 +37,7 @@
  * Input: argc, argv - command line arguments
  * Output: inputFiles, outputFiles, parameters, gt_parameters, - algorithm parameters
  */
+namespace gipuma {
 static void getParametersFromFile(const char* filename, AlgorithmParameters& algParams)
 {
     const std::string box_hsize = "box_hsize:";
@@ -340,7 +341,7 @@ static void addImageToTextureFloatGray (std::vector<cv::Mat > &imgs, cudaTexture
     return;
 }
 
-static void selectCudaDevice ()
+void selectCudaDevice ()
 {
     int deviceCount = 0;
     checkCudaErrors(cudaGetDeviceCount(&deviceCount));
@@ -505,4 +506,5 @@ bool GipumaMain(const std::vector<cv::Mat_<float>> &images,
     bool ret = runGipuma(images, projection_matrices, depth_map, normal_map, dMin, dMax, *algParams);
 
     return ret;
+}
 }

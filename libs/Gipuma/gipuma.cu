@@ -887,35 +887,41 @@ __device__ FORCEINLINE void spatialPropagation_cu ( const cudaTextureObject_t *i
  *         normOut - new normal
  */
 __device__ FORCEINLINE void getRndDispAndUnitVector_cu (
+                                                        const float init_depth,
                                                         float disp,
                                                         const float4 norm,
                                                         float &dispOut,
                                                         float4 * __restrict__ normOut,
-                                                        const float maxDeltaZ,
+                                                        float maxDepth,
                                                         const float maxDeltaN,
-                                                        const float minDisparity,
-                                                        const float maxDisparity,
                                                         curandState *cs,
-                                                        CameraParameters_cu &camParams,
-                                                        const float baseline,
                                                         const float4 viewVector) {
     //convert depth to disparity and back for non-rectified approach
-    disp = disparityDepthConversion_cu ( camParams.f, baseline, disp );
+    // disp = disparityDepthConversion_cu ( camParams.f, baseline, disp );
 
     //delta min limited by disp=0 and image border
     //delta max limited by disp=maxDisparity and image border
-    float minDelta, maxDelta;
-    minDelta = -min ( maxDeltaZ, minDisparity + disp ); //limit new disp>=0
-    maxDelta = min ( maxDeltaZ, maxDisparity - disp ); //limit new disp < maxDisparity
+    // float minDelta, maxDelta;
+    // minDelta = -min ( maxDeltaZr, minDisparity + disp ); //limit new disp>=0
+    // maxDelta = min ( maxDeltaZl, maxDisparity - disp ); //limit new disp < maxDisparity
 
     /*minDelta ; -minDelta;*/
 
-    float deltaZ = curand_between(cs, minDelta, maxDelta);
+    // float deltaZ = curand_between(cs, minDelta, maxDelta);
     //get new disparity value within valid range [0 maxDisparity]
-    dispOut = fminf ( fmaxf ( disp + deltaZ, minDisparity ), maxDisparity );
+    // dispOut = fminf ( fmaxf ( disp + deltaZ, minDisparity ), maxDisparity );
 
-    dispOut = disparityDepthConversion_cu ( camParams.f, baseline, dispOut );
+    // dispOut = disparityDepthConversion_cu ( camParams.f, baseline, dispOut );
 
+    float minDepth = maxDepth - 0.005;
+    unsigned int randNum = ceilf(curand_uniform(cs) * 100);
+    if (randNum % 2 == 0) {
+        float tmp = minDepth;
+        minDepth = -min (maxDepth, init_depth);
+        maxDepth = -min (tmp, init_depth);
+    }
+
+    dispOut = init_depth + curand_between(cs, minDepth, maxDepth);
     //get normal
     normOut->x = norm.x + curand_between (cs, -maxDeltaN, maxDeltaN );
     normOut->y = norm.y + curand_between (cs, -maxDeltaN, maxDeltaN );
@@ -926,6 +932,7 @@ __device__ FORCEINLINE void getRndDispAndUnitVector_cu (
 }
 template< typename T >
 __device__ FORCEINLINE static void planeRefinement_cu (
+                                                       const float init_depth,
                                                        const cudaTextureObject_t *images,
                                                        const T * __restrict__ tile_left,
                                                        const int2 &p,
@@ -948,26 +955,27 @@ __device__ FORCEINLINE static void planeRefinement_cu (
 
     // divide delta by 4 instead of 2 for less iterations (for higher disparity range)
     // iteration is done over disparity values even for multi-view case in order to have approximately unifom sampling along epipolar line
-    /*for ( float deltaZ = ( float ) algParams.max_disparity / 2.0f; deltaZ >= 0.1f; deltaZ = deltaZ / 4.0f ) {*/
     float4 norm_temp;
     float dispTemp_L;
     float dTemp_L;
     float costTempL;
 
-    const float maxdisp=algParams.max_disparity / 2.0f; // temp variable
-   for ( float deltaZ = maxdisp; deltaZ >= 0.01f; deltaZ = deltaZ / 10.0f ) {
+    float baseline = camParams.cameras[0].baseline;
+    float depth_ranges[6] = {0.005, 0.010, 0.015, 0.020, 0.025, 0.030};
+
+    for (size_t i=0; i < 6; ++i) {
         getRndDispAndUnitVector_cu (
+                                    init_depth,
                                     *disp_now, *norm_now,
-                                    dispTemp_L, &norm_temp,
-                                    deltaZ, deltaN,
-                                    algParams.min_disparity, algParams.max_disparity,
+                                    dispTemp_L, &norm_temp, 
+                                    depth_ranges[i],
+                                    deltaN,
                                     cs,
-                                    camParams, camParams.cameras[0].baseline,
                                     viewVector);
 
         dTemp_L = getD_cu ( norm_temp,
                             p,
-                            dispTemp_L, camParams.cameras[camIdx] );
+                            dispTemp_L, camParams.cameras[camIdx]);
 
         norm_temp.w = dTemp_L; // TODO might save a variable here
         costTempL = pmCostMultiview_cu<T> ( images,
@@ -1012,7 +1020,7 @@ __global__ void gipuma_init_cu2(GlobalState &gs)
     int box_vrad = gs.params->box_vsize / 2;
 
     float disp_now;
-    float4 norm_now;
+    float4 norm_now = gs.lines->norm4[center];
 
     curandState localState = gs.cs[p.y*cols+p.x];
     curand_init ( clock64(), p.y, p.x, &localState );
@@ -1025,7 +1033,6 @@ __global__ void gipuma_init_cu2(GlobalState &gs)
     //printf("Random number is %f\n", random_number);
     //return;
     //disp_now = curand_between(&localState, mind, maxd);
-
     rndUnitVectorOnHemisphere_cu ( &norm_now, viewVector, &localState );
     // disp_now= disparityDepthConversion_cu ( camera.f, camera.baseline, disp_now);
     disp_now = gs.lines->init_depth[center];
@@ -1136,6 +1143,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_cu(GlobalState &gs, int2 p, cons
 
     const LineState &line = *(gs.lines);
     float *c     = line.c;
+    float *init_depth = line.init_depth;
     //float *disp  = line.disp;
     float4 *norm = line.norm4;
 
@@ -1328,7 +1336,9 @@ __device__ FORCEINLINE void gipuma_checkerboard_cu(GlobalState &gs, int2 p, cons
     }
 #endif
 
-    planeRefinement_cu<T> (imgs,
+    planeRefinement_cu<T> (
+                        init_depth[center],
+                        imgs,
                         tile_left,
                         p,
                         tile_offset,
@@ -1594,6 +1604,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_planeRefinement_cu(GlobalState &
 
     const LineState &line = *(gs.lines);
     float *c     = line.c;
+    float *init_depth = line.init_depth;
     //float *disp  = line.disp;
     float4 *norm = line.norm4;
 
@@ -1688,7 +1699,9 @@ __device__ FORCEINLINE void gipuma_checkerboard_planeRefinement_cu(GlobalState &
 #endif
 
 
-    planeRefinement_cu<T> (imgs,
+    planeRefinement_cu<T> (
+                        init_depth[center],
+                        imgs,
                         tile_left,
                         p,
                         tile_offset,
