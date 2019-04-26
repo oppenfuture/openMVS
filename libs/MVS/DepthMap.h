@@ -108,6 +108,8 @@ extern float fRandomSmoothDepth;
 extern float fRandomSmoothNormal;
 extern float fRandomSmoothBonus;
 extern bool importReferenceDepth;
+extern bool updateReferenceDepthWithPoints;
+extern bool forceRecompute;
 extern unsigned nPixelArea;
 extern String paramsFile;
 extern int algorithm;

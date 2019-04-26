@@ -144,8 +144,8 @@ public:
 	bool FilterDepthMap(DepthData& depthData, const IIndexArr& idxNeighbors, bool bAdjust=true);
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
-	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size);
-  bool InitDepthMapByNeighbour(DepthData& depthData, const std::string& realsense_filename, const Image &image);
+	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size, const bool updateFlag=false);
+  bool InitDepthMapByRealsense(DepthData& depthData, const std::string& realsense_filename, const Image &image);
 
 protected:
 
@@ -240,7 +240,7 @@ namespace MVS {
     z_vals[idx] += w * pt.z;
   }
 
-  void InitDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
+  void WrapDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
     std::vector<TPoint3<float> > image_points;
     std::vector<TPoint3<float> > world_points;
     std::vector<TPoint3<float> > rgb_points;
@@ -283,21 +283,27 @@ namespace MVS {
     }
 
     depth_data.depthMap = cv::Mat_<float>::zeros(image.height, image.width);
+		depth_data.dMin = FLT_MAX;
+		depth_data.dMax = 0;
 
     for (size_t r = 0; r < image.height; ++r) {
       for (size_t c = 0; c < image.width; ++c) {
         int idx = r * image.width + c;
         if (weights[idx] > 0) {
-          depth_data.depthMap(r, c) = z_vals[idx] / weights[idx];
+					float d = z_vals[idx] / weights[idx];
+					if (depth_data.dMin > d)
+						depth_data.dMin = d;
+					if (depth_data.dMax < d)
+						depth_data.dMax = d;
+          depth_data.depthMap(r, c) = d;
         }
       }
     }
-      
   #if TD_VERBOSE != TD_VERBOSE_OFF
   	if (g_nVerbosityLevel > 4) {
     	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-3)+".pfm");
-  	}	
-#endif
+  	}
+	#endif
   }
 } // namespace MVS
 /****************************************************************/
@@ -318,7 +324,8 @@ bool DepthMapsData::NoPatchMatch(IIndex idxImage) {
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-        // reference depth map already loaded in processimage
+				//todo by dushuai
+        // reference depth map already loaded
         InitDepthMapWithoutTriangulation(depthData, size);
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
@@ -440,8 +447,11 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
   // initialize the depth-map
   if (OPTDENSE::importReferenceDepth) {
-    // reference depth map already loaded in processimage
-    if (depthData.depthMap.empty()) {
+    // reference depth map already loaded
+		if (OPTDENSE::updateReferenceDepthWithPoints) {
+			InitDepthMapWithoutTriangulation(depthData, size, true);
+		}
+    else if (depthData.depthMap.empty()) {
       depthData.depthMap.create(size); depthData.depthMap.memset(0);
       InitDepthMapWithoutTriangulation(depthData, size);
     }
@@ -485,7 +495,7 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
       depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
 		  depthData.normalMap = TransformTImage(normal_map);
 		}
-		
+
 		// GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax, OPTDENSE::paramsFile.c_str());
 		// depthData.depthMap = depth_map;
 
@@ -988,7 +998,7 @@ bool DepthMapsData::InitDepthMap(DepthData& depthData)
 } // InitDepthMap
 /*----------------------------------------------------------------*/
 
-bool DepthMapsData::InitDepthMapByNeighbour(DepthData& depthData, const std::string& realsense_filename, const Image& image) {
+bool DepthMapsData::InitDepthMapByRealsense(DepthData& depthData, const std::string& realsense_filename, const Image& image) {
   std::ifstream infile(realsense_filename);
   if (!infile.good()) {
     std::cerr << "Failed opening realsense json" << std::endl;
@@ -1012,6 +1022,7 @@ bool DepthMapsData::InitDepthMapByNeighbour(DepthData& depthData, const std::str
   auto view = j[image_name];
   auto view_params = view["ref_depth"];
   auto ref_filename = view_params["filename"];
+	// load realsense depth
   depthData.depthMap.Load(GetDir(image.name) + ref_filename.get<std::string>());
 
   std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
@@ -1038,10 +1049,11 @@ bool DepthMapsData::InitDepthMapByNeighbour(DepthData& depthData, const std::str
       R(i, j) = extrinsics[j][i];
     }
   }
-  InitDepth(K, R, C, image, depthData);
+	// realsense-depth to rgb-depth
+  WrapDepth(K, R, C, image, depthData);
 
   return true;
-} // RealSenseToRgb
+} // InitDepthMapByRealsense
 
 // initialize the confidence map (NCC score map) with the score of the current estimates
 void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
@@ -1128,17 +1140,29 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 	return NULL;
 }
 
-bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size) {
+bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size, const bool updateFlag) {
 	// compute depth range and initialize known depths
 	const int nPixelArea = (int)OPTDENSE::nPixelArea; // half windows size around a pixel to be initialize with the known depth
 	const Camera& camera = depthData.images.First().camera;
-	depthData.dMin = FLT_MAX;
-	depthData.dMax = 0;
+	if (!updateFlag)
+	{
+		depthData.dMin = FLT_MAX;
+		depthData.dMax = 0;
+	}
+	else
+	{
+		depthData.dMin = depthData.dMin / 0.9f;
+		depthData.dMax = depthData.dMax / 1.1f;
+	}
+	float small_depth = 0.01;
 	FOREACHPTR(pPoint, depthData.points) {
 		const PointCloud::Point& X = scene.pointcloud.points[*pPoint];
 		const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
 		const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
 		const float d((float)camX.z);
+		if (updateFlag && abs(depthData.depthMap(x.y,x.x) - d) > small_depth) {
+			continue;
+		}
 		const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
 		const ImageRef ex(MINF(x.x+nPixelArea,size.width-1), MINF(x.y+nPixelArea,size.height-1));
 		for (int y=sx.y; y<=ex.y; ++y)
@@ -1183,7 +1207,8 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-        // reference depth map already loaded in processimage
+				//todo by dushuai
+        // reference depth map already loaded
         InitDepthMapWithoutTriangulation(depthData, size);
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
@@ -2262,7 +2287,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				break;
 			}
 			// try to load already compute depth-map for this image
-			if (depthData.Load(ComposeDepthFilePath(idx, "dmap"))) {
+			if (depthData.Load(ComposeDepthFilePath(idx, "dmap")) && !OPTDENSE::forceRecompute) {
 				std::string depthFilePath = ComposeDepthFilePath(idx, "pfm");
 				if (!exportDmapOnly && access(depthFilePath.c_str(), 0) != -1)
 					depthData.depthMap.Load(depthFilePath);
@@ -2277,20 +2302,21 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				// process next image
 				data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			} else {
-				// estimate depth-map
-				if (OPTDENSE::importReferenceDepth) {
-          data.detphMaps.InitDepthMapByNeighbour(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
-        }
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
-			break; }
-
+			break;
+		}
 		case EVT_ESTIMATEDEPTHMAP: {
 			const EVTEstimateDepthMap& evtImage = *((EVTEstimateDepthMap*)(Event*)evt);
 			// request next image initialization to be performed while computing this depth-map
 			data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			// extract depth map
 			data.sem.Wait();
+			if (OPTDENSE::importReferenceDepth) {
+				const IIndex idx = data.images[evtImage.idxImage];
+				DepthData& depthData(data.detphMaps.arrDepthData[idx]);
+        data.detphMaps.InitDepthMapByRealsense(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
+      }
 			if (OPTDENSE::algorithm == 0) {
 				data.detphMaps.GipumaEstimate(data.images[evtImage.idxImage]);
 			} else if (OPTDENSE::algorithm == 1) {
@@ -2306,8 +2332,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				// save depth-map
 				data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			}
-			break; }
-
+			break;
+		}
 		case EVT_OPTIMIZEDEPTHMAP: {
 			const EVTOptimizeDepthMap& evtImage = *((EVTOptimizeDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
@@ -2332,8 +2358,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			// save depth-map
 			data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
-			break; }
-
+			break;
+		}
 		case EVT_SAVEDEPTHMAP: {
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
@@ -2358,11 +2384,11 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			depthData.ReleaseImages();
 			depthData.Release();
 			data.progress->operator++();
-			break; }
-
+			break;
+		}
 		case EVT_CLOSE: {
-			return; }
-
+			return;
+		}
 		default:
 			ASSERT("Should not happen!" == NULL);
 		}
