@@ -240,7 +240,7 @@ namespace MVS {
     z_vals[idx] += w * pt.z;
   }
 
-  void WrapDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
+  void WarpDepth(const cv::Matx<float,3,3>& K, const cv::Matx<float,3,3>& R, const cv::Point3_<float>& C, const Image& image, DepthData &depth_data) {
     std::vector<TPoint3<float> > image_points;
     std::vector<TPoint3<float> > world_points;
     std::vector<TPoint3<float> > rgb_points;
@@ -1050,7 +1050,7 @@ bool DepthMapsData::InitDepthMapByRealsense(DepthData& depthData, const std::str
     }
   }
 	// realsense-depth to rgb-depth
-  WrapDepth(K, R, C, image, depthData);
+  WarpDepth(K, R, C, image, depthData);
 
   return true;
 } // InitDepthMapByRealsense
