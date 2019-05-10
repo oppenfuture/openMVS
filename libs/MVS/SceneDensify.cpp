@@ -1160,7 +1160,7 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 		const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
 		const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
 		const float d((float)camX.z);
-		if (updateFlag && abs(depthData.depthMap(x.y,x.x) - d) > small_depth) {
+		if (updateFlag && depthData.depthMap(x.y,x.x) != 0.f && abs(depthData.depthMap(x.y,x.x) - d) > small_depth) {
 			continue;
 		}
 		const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
@@ -2384,7 +2384,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			depthData.ReleaseImages();
 			depthData.Release();
 			data.progress->operator++();
-			break;
+      break;
 		}
 		case EVT_CLOSE: {
 			return;

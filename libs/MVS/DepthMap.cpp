@@ -308,6 +308,7 @@ bool DepthEstimator::FillPixelPatch()
 		for (int j=-nSizeHalfWindow; j<=nSizeHalfWindow; ++j)
 			normSq0 += SQUARE(*pTexel0++ = image0.image(x0.y+i, x0.x+j)-mean);
 	X0 = (const Vec3&)image0.camera.TransformPointI2C(Cast<REAL>(x0));
+	// whether texture variance is larger than threshold
 	return normSq0 > thMagnitudeSq;
 }
 
