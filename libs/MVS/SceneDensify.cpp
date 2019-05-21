@@ -486,15 +486,55 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 
 		// cv::Mat_<float> depth_map;
     depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-		for (int  iter = 0; iter < 1; ++iter) {
-  		cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap;
-			gipuma::GipumaMain(images, projection_matrices, depthData.depthMap,
-        normal_map, depthData.dMin, depthData.dMax,
-				OPTDENSE::paramsFile.c_str());
-    	const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-      depthData.depthMap.Save(path + "." + std::to_string(iter) + ".depth.pfm");
-		  depthData.normalMap = TransformTImage(normal_map);
-		}
+    cv::Mat_<cv::Point3_<float>> normal_map(depthData.depthMap.height(), depthData.depthMap.width());
+      // cv::Mat_<cv::Point3_<float>>::zeros(depthData.depthMap.height(), depthData.depthMap.width());
+    int delta_x[] = {-1, 0, 1, 0};
+    int delta_y[] = {0, 1, 0, -1};
+    for (int y = 0 ; y < normal_map.rows; ++y) {
+      for (int x = 0; x < normal_map.cols; ++x) {
+        Point3f ic(x, y, depthData.depthMap(y, x));
+        Point3f pc0 =
+          depthData.images.First().camera.TransformPointI2C(ic);
+        Point3f normal(0, 0, 0);
+        float weight = 0;
+        for (int k = 0; k < 4; ++k) {
+          int x1 = x + delta_x[k];
+          int y1 = y + delta_y[k];
+          int x2 = x + delta_x[(k + 1) % 4];
+          int y2 = y + delta_y[(k + 1) % 4];
+          if (depthData.depthMap.isInside({x1, y1}) && depthData.depthMap.isInside({x2, y2})) {
+            Point3f ic1(x1, y1, depthData.depthMap(y1, x1));
+            Point3f ic2(x2, y2, depthData.depthMap(y2, x2));
+            Point3f pc1 =
+              depthData.images.First().camera.TransformPointI2C(ic1);
+            Point3f pc2 =
+              depthData.images.First().camera.TransformPointI2C(ic2);
+
+            Point3f edge1(pc1-pc0);
+            Point3f edge2(pc2-pc0);
+            Point3f tmp_normal = edge1.cross(edge2);
+            weight += norm(tmp_normal);
+            normal += tmp_normal;
+          }
+        }
+        // if (weight > 0)
+        //   normal /= weight;
+        auto real_normal = normalized(normal);
+        normal_map(y, x) = cv::Point3_<float>(real_normal.x, real_normal.y, real_normal.z);
+      }
+    }
+  	const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+	  depthData.normalMap = TransformTImage(normal_map);
+    ExportNormalMap(path + ".init.normal.png", depthData.normalMap);
+    std::string prefix(path);
+		gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
+      normal_map, depthData.dMin, depthData.dMax,
+			OPTDENSE::paramsFile.c_str());
+    depthData.normalMap = TransformTImage(normal_map);
+    depthData.normalMap.Save(path + ".normal.pfm");
+    ExportNormalMap(path + ".normal.png", depthData.normalMap);
+    depthData.depthMap.Save(path + ".depth.pfm");
+    // depthData.normalMap.Save(path + ".normal.pfm");
 
 		// GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax, OPTDENSE::paramsFile.c_str());
 		// depthData.depthMap = depth_map;

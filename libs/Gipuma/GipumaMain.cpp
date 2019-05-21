@@ -14,6 +14,7 @@
 
 #include <string>
 #include <iostream>
+#include <fstream>
 
 // Includes CUDA
 #include <cuda_runtime.h>
@@ -32,6 +33,7 @@
 #include "mathUtils.h"
 #include "GipumaMain.h"
 #include "algorithmparameters.h"
+#include "fileIoUtils.h"
 
 /* process command line arguments
  * Input: argc, argv - command line arguments
@@ -377,7 +379,9 @@ void selectCudaDevice ()
     cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 1024*128);
 }
 
-bool runGipuma(const std::vector<cv::Mat_<float>> &images,
+bool runGipuma(
+    const std::string &prefix,
+    const std::vector<cv::Mat_<float>> &images,
                      const std::vector<cv::Mat_<float>> &projection_matrices,
                      cv::Mat_<float> &depth_map,
                      cv::Mat_<cv::Point3_<float>> &normal_map,
@@ -416,6 +420,32 @@ bool runGipuma(const std::vector<cv::Mat_<float>> &images,
 
     selectViews ( cameraParams, cols, rows, algParams);
     int numSelViews = cameraParams.viewSelectionSubset.size ();
+     std::fstream out(prefix + ".cams.txt", std::ios::out);
+    out << numSelViews << std::endl;
+    for (int i = 0; i < 9; ++i)
+        out << *(gs->cameras->cameras[0].K + i) << " ";
+    for (int i = 0; i < 9; ++i)
+        out << *(gs->cameras->cameras[0].K_inv + i) << " ";
+    for (int i = 0; i < 9; ++i)
+        out << *(gs->cameras->cameras[0].M_inv + i) << " ";
+    out << gs->cameras->cameras[0].P_col34.x << " " <<
+        gs->cameras->cameras[0].P_col34.y << " " <<
+        gs->cameras->cameras[0].P_col34.z << std::endl;
+
+    for ( int i = 0; i < numSelViews; i++ ) {
+        gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];
+        int cam_id = cameraParams.viewSelectionSubset[i];
+        out << cam_id << " ";
+        for (int j = 0; j < 9; ++j)
+            out << *(gs->cameras->cameras[cam_id].R + j) << " ";
+        out << gs->cameras->cameras[cam_id].t4.x << " " <<
+            gs->cameras->cameras[cam_id].t4.y << " " <<
+            gs->cameras->cameras[cam_id].t4.z << std::endl;;
+        savePfm(images[cam_id], prefix + "." + std::to_string(cam_id) + ".gray.pfm");
+    }
+    savePfm(images[0], prefix + ".0.gray.pfm");
+    out.close();
+
     for ( int i = 0; i < numSelViews; i++ ) {
         gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];
     }
@@ -459,6 +489,9 @@ bool runGipuma(const std::vector<cv::Mat_<float>> &images,
         for (size_t c=0; c<cols; ++c) {
             for (size_t r=0; r<rows; ++r) {
                 gs->lines->init_depth[r*cols + c] = depth_map(r, c);
+                gs->lines->norm4[r*cols + c].x = normal_map(r, c).x;
+                gs->lines->norm4[r*cols + c].y = normal_map(r, c).y;
+                gs->lines->norm4[r*cols + c].z = normal_map(r, c).z;
             }
         }
     }
@@ -492,7 +525,9 @@ bool runGipuma(const std::vector<cv::Mat_<float>> &images,
     return true;
 }
 
-bool GipumaMain(const std::vector<cv::Mat_<float>> &images,
+bool GipumaMain(
+    const std::string &prefix,
+    const std::vector<cv::Mat_<float>> &images,
                const std::vector<cv::Mat_<float>> &projection_matrices,
                cv::Mat_<float> &depth_map,
                cv::Mat_<cv::Point3_<float>> &normal_map,
@@ -503,7 +538,7 @@ bool GipumaMain(const std::vector<cv::Mat_<float>> &images,
 
     getParametersFromFile(config_filename, *algParams);
 
-    bool ret = runGipuma(images, projection_matrices, depth_map, normal_map, dMin, dMax, *algParams);
+    bool ret = runGipuma(prefix, images, projection_matrices, depth_map, normal_map, dMin, dMax, *algParams);
 
     return ret;
 }

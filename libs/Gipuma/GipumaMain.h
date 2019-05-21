@@ -12,7 +12,9 @@
 namespace gipuma {
 void selectCudaDevice();
 
-bool GipumaMain(const std::vector<cv::Mat_<float>> &images,
+bool GipumaMain(
+  const std::string &prefix,
+  const std::vector<cv::Mat_<float>> &images,
         const std::vector<cv::Mat_<float>> &projection_matrices,
         cv::Mat_<float> &depth_map,
         cv::Mat_<cv::Point3_<float>> &normal_map,
