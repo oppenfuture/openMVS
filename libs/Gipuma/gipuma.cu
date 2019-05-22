@@ -23,7 +23,7 @@
 
 //#define CENSUS
 #define SHARED
-#define NOTEXTURE_CHECK
+// #define NOTEXTURE_CHECK
 #define WIN_INCREMENT 2
 
 // uses smaller (but more) kernels, use if windows watchdog is enabled or if you want frequent display updates
@@ -53,6 +53,21 @@ __managed__ int WIN_RADIUS_H;
 __managed__ int TILE_W;
 __managed__ int TILE_H;
 #endif
+
+__device__ FORCEINLINE float depthCost ( const float &depth, const float &init_depth) {
+    float cost;
+    float k = 555;
+    float delta = fabsf(depth - init_depth);
+    if (init_depth == 0)
+        cost = 0;
+    else {
+        if (delta <= 0.03)
+            cost = 2 * k * pow2(delta);
+        else
+            cost = MAXCOST;
+    }
+    return cost;
+}
 
 /*__device__ FORCEINLINE __constant__ float4 camerasK[32];*/
 
@@ -795,6 +810,8 @@ __device__ FORCEINLINE static float pmCostMultiview_cu (
         cost = cost + c;
     }
     cost = cost / ( ( float ) numConsidered);
+
+
     if ( numConsidered < 1 )
         cost = MAXCOST;
 
@@ -829,7 +846,9 @@ __device__ FORCEINLINE float get_smoothness_at2 ( const float4 * __restrict__ st
 disp >= camParams.cameras[REFERENCE].depthMin && disp <= camParams.cameras[REFERENCE].depthMax
 
 template< typename T >
-__device__ FORCEINLINE void spatialPropagation_cu ( const cudaTextureObject_t *imgs,
+__device__ FORCEINLINE void spatialPropagation_cu ( 
+                                                    const float &init_depth,
+                                                    const cudaTextureObject_t *imgs,
                                                     const T * __restrict__ tile_left,
                                                     const int2 &tile_offset,
                                                     const int2 &p,
@@ -860,7 +879,8 @@ __device__ FORCEINLINE void spatialPropagation_cu ( const cudaTextureObject_t *i
                                                 camParams,
                                                 state,
                                                 point);
-
+    if (cost_before < MAXCOST)
+        cost_before = fminf(MAXCOST, cost_before + depthCost(disp_before, init_depth));
     if ( ISDISPDEPTHWITHINBORDERS(disp_before,camParams,REFERENCE,algParams) )
     {
         if ( cost_before < *cost_now ) {
@@ -987,7 +1007,10 @@ __device__ FORCEINLINE static void planeRefinement_cu (
                                             algParams, camParams,
                                             state,
                                             0);
-
+        if (costTempL < MAXCOST) {
+            float depth = getDisparity_cu (norm_temp, norm_temp.w, p, camParams.cameras[REFERENCE] );
+            costTempL = fminf(MAXCOST, costTempL + depthCost(depth, init_depth));
+        }
         //if (dTemp_L==dTemp_L && dTemp_L!= 0) // XXX
         {
             if ( costTempL < *cost_now ) {
@@ -1241,7 +1264,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_cu(GlobalState &gs, int2 p, cons
     }
 #endif
 
-#define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
+#define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth, imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
 
     if (p.y>0) {
         SPATIALPROPAGATION(up);
@@ -1369,6 +1392,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropFar_cu(GlobalState &g
     const LineState &line = *(gs.lines);
     float *c     = line.c;
     //float *disp  = line.disp;
+    float *init_depth = line.init_depth;
     float4 *norm = line.norm4;
 
     float disp_now;
@@ -1455,7 +1479,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropFar_cu(GlobalState &g
     // Right by 5
     const int right = center+5;
 
-    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
+    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
 
     if (p.y>4) {
         SPATIALPROPAGATION(up);
@@ -1488,7 +1512,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropClose_cu(GlobalState 
     float *c     = line.c;
     //float *disp  = line.disp;
     float4 *norm = line.norm4;
-
+    float *init_depth = line.init_depth;
     float disp_now;
     float cost_now;
     float4 norm_now;
@@ -1576,7 +1600,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropClose_cu(GlobalState 
     // Right
     const int right = center+1;
 
-    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
+    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
 
     if (p.y>0) {
         SPATIALPROPAGATION(up);
