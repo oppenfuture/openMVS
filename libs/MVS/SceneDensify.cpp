@@ -301,7 +301,7 @@ namespace MVS {
     }
   #if TD_VERBOSE != TD_VERBOSE_OFF
   	if (g_nVerbosityLevel > 4) {
-    	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-3)+".pfm");
+    	depth_data.depthMap.Save(image.name.substr(0, image.name.size()-4)+".pfm");
   	}
 	#endif
   }
@@ -464,6 +464,14 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
         InitDepthMap(depthData);
       }
   }
+
+  // use warped depth as init confMap
+	cv::Mat mask_img(size.height, size.width, CV_32F);
+	cv::threshold(depthData.depthMap, mask_img, 0.0, 1.0, cv::THRESH_BINARY);
+	int kernel_size = (int)OPTDENSE::nPixelArea * 2 + 1;
+	auto kernel = cv::Mat::ones(kernel_size, kernel_size, CV_32F) / (float)(kernel_size*kernel_size);
+	cv::filter2D(mask_img, depthData.confMap, mask_img.depth(), kernel);
+
 #if TD_VERBOSE != TD_VERBOSE_OFF
   // save rough depth map as image
   if (g_nVerbosityLevel > 4) {
@@ -545,12 +553,12 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 		if (g_nVerbosityLevel > 4) {
 			const String path(ComposeDepthFilePath(idxImage, "gipuma"));
 			depthData.depthMap.Save(path + ".depth.pfm");
+      depthData.confMap.Save(path + ".conf.pfm");
 			depthData.normalMap.Save(path + ".normal.pfm");
 			ExportDepthMap(path + ".png", depthData.depthMap);
 			ExportNormalMap(path + ".normal.png", depthData.normalMap);
 			ExportPointCloud(path + ".ply", *depthData.images.First().pImageData, depthData.depthMap,
 							 depthData.normalMap);
-			ExportConfidenceMap(path + ".conf.png", depthData.confMap);
 		}
 #endif
 	}
@@ -1102,7 +1110,7 @@ void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
 	IDX idx;
 	while ((idx=(IDX)Thread::safeInc(estimator.idxPixel)) < estimator.coords.GetSize()) {
 		const ImageRef& x = estimator.coords[idx];
-		if (!estimator.PreparePixelPatch(x) || !estimator.FillPixelPatch()) {
+		if (!estimator.PreparePixelPatch(x) || (!estimator.FillPixelPatch() && estimator.confMap0(x) < 0.5)) {
 			estimator.depthMap0(x) = 0;
 			estimator.normalMap0(x) = Normal::ZERO;
 			estimator.confMap0(x) = DepthEstimator::EncodeScoreScale(2.f);
