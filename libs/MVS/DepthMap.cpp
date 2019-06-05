@@ -105,7 +105,7 @@ MDEFVAR_OPTDENSE_bool(forceRecompute, "Force recompute", "force to recompute dep
 MDEFVAR_OPTDENSE_uint32(nPixelArea, "half window size", "half windows size around a pixel to be initialize with the known depth", "3")
 MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "gipuma_params.txt")
 MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "1", "0")
-MDEFVAR_OPTDENSE_string(strRealsenseFileName, "realsense depth-map and params", "realsense params file", "realsense.json")
+MDEFVAR_OPTDENSE_string(strRealsenseFileName, "realsense to rgb warp matrix", "realsense params file", "realsense_warp_data.json")
 }
 
 

@@ -1049,11 +1049,11 @@ bool DepthMapsData::InitDepthMap(DepthData& depthData)
 bool DepthMapsData::InitDepthMapByRealsense(DepthData& depthData, const std::string& realsense_filename, const Image& image) {
   std::ifstream infile(realsense_filename);
   if (!infile.good()) {
-    std::cerr << "Failed opening realsense json" << std::endl;
+    std::cerr << "Failed opening realsense_warp_data json" << std::endl;
     return false;
   }
   /*
-  realsense.json format:
+  realsense_warp_data.json format:
       {
           "P1001012.JPG": {
               "ref_depth": {
