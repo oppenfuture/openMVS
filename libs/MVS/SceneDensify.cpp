@@ -1208,19 +1208,26 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 		const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
 		const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
 		const float d((float)camX.z);
-		if (updateFlag && depthData.depthMap(x.y,x.x) != 0.f && abs(depthData.depthMap(x.y,x.x) - d) > small_depth) {
-			continue;
-		}
 		const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
 		const ImageRef ex(MINF(x.x+nPixelArea,size.width-1), MINF(x.y+nPixelArea,size.height-1));
+
+		bool valid_coord = false;
 		for (int y=sx.y; y<=ex.y; ++y)
 			for (int x=sx.x; x<=ex.x; ++x)
 				if (depthData.mask.empty() || depthData.mask.isSet(y,x))
+				{
+					if (updateFlag && depthData.depthMap(y,x) != 0.f && abs(depthData.depthMap(y,x) - d) > small_depth)
+						continue;
 					depthData.depthMap(y,x) = d;
-		if (depthData.dMin > d)
-			depthData.dMin = d;
-		if (depthData.dMax < d)
-			depthData.dMax = d;
+					valid_coord = true;
+				}
+		if (valid_coord)
+		{
+			if (depthData.dMin > d)
+				depthData.dMin = d;
+			if (depthData.dMax < d)
+				depthData.dMax = d;
+		}
 	}
 	depthData.dMin *= 0.9f;
 	depthData.dMax *= 1.1f;
