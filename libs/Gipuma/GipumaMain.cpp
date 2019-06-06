@@ -5,7 +5,7 @@
 #include <ctime>
 #include <math.h>
 #include <stdexcept>
-    
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -350,7 +350,7 @@ void selectCudaDevice ()
     if (deviceCount == 0) {
         fprintf(stderr, "There is no cuda capable device!\n");
         exit(EXIT_FAILURE);
-    } 
+    }
     std::cout << std::endl << "Detected " << deviceCount << " devices!" << std::endl;
     std::vector<int> usableDevices;
     std::vector<std::string> usableDeviceNames;
@@ -420,31 +420,35 @@ bool runGipuma(
 
     selectViews ( cameraParams, cols, rows, algParams);
     int numSelViews = cameraParams.viewSelectionSubset.size ();
-     std::fstream out(prefix + ".cams.txt", std::ios::out);
-    out << numSelViews << std::endl;
-    for (int i = 0; i < 9; ++i)
-        out << *(gs->cameras->cameras[0].K + i) << " ";
-    for (int i = 0; i < 9; ++i)
-        out << *(gs->cameras->cameras[0].K_inv + i) << " ";
-    for (int i = 0; i < 9; ++i)
-        out << *(gs->cameras->cameras[0].M_inv + i) << " ";
-    out << gs->cameras->cameras[0].P_col34.x << " " <<
-        gs->cameras->cameras[0].P_col34.y << " " <<
-        gs->cameras->cameras[0].P_col34.z << std::endl;
 
-    for ( int i = 0; i < numSelViews; i++ ) {
-        gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];
-        int cam_id = cameraParams.viewSelectionSubset[i];
-        out << cam_id << " ";
-        for (int j = 0; j < 9; ++j)
-            out << *(gs->cameras->cameras[cam_id].R + j) << " ";
-        out << gs->cameras->cameras[cam_id].t4.x << " " <<
-            gs->cameras->cameras[cam_id].t4.y << " " <<
-            gs->cameras->cameras[cam_id].t4.z << std::endl;;
-        savePfm(images[cam_id], prefix + "." + std::to_string(cam_id) + ".gray.pfm");
+#if TD_VERBOSE != TD_VERBOSE_OFF
+    if (g_nVerbosityLevel > 4) {
+        std::fstream out(prefix + ".cams.txt", std::ios::out);
+        out << numSelViews << std::endl;
+        for (int i = 0; i < 9; ++i)
+            out << *(gs->cameras->cameras[0].K + i) << " ";
+        for (int i = 0; i < 9; ++i)
+            out << *(gs->cameras->cameras[0].K_inv + i) << " ";
+        for (int i = 0; i < 9; ++i)
+            out << *(gs->cameras->cameras[0].M_inv + i) << " ";
+        out << gs->cameras->cameras[0].P_col34.x << " " <<
+            gs->cameras->cameras[0].P_col34.y << " " <<
+            gs->cameras->cameras[0].P_col34.z << std::endl;
+
+        for ( int i = 0; i < numSelViews; i++ ) {
+            gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];
+            int cam_id = cameraParams.viewSelectionSubset[i];
+            out << cam_id << " ";
+            for (int j = 0; j < 9; ++j)
+                out << *(gs->cameras->cameras[cam_id].R + j) << " ";
+            out << gs->cameras->cameras[cam_id].t4.x << " " <<
+                gs->cameras->cameras[cam_id].t4.y << " " <<
+                gs->cameras->cameras[cam_id].t4.z << std::endl;;
+            savePfm(images[cam_id], prefix + "." + std::to_string(cam_id) + ".gray.pfm");
+        }
+        savePfm(images[0], prefix + ".0.gray.pfm");
+        out.close();
     }
-    savePfm(images[0], prefix + ".0.gray.pfm");
-    out.close();
 
     for ( int i = 0; i < numSelViews; i++ ) {
         gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];

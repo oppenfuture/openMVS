@@ -324,9 +324,14 @@ bool DepthMapsData::NoPatchMatch(IIndex idxImage) {
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-				//todo by dushuai
         // reference depth map already loaded
-        InitDepthMapWithoutTriangulation(depthData, size);
+        if (OPTDENSE::updateReferenceDepthWithPoints) {
+            InitDepthMapWithoutTriangulation(depthData, size, true);
+        }
+        else if (depthData.depthMap.empty()) {
+            depthData.depthMap.create(size); depthData.depthMap.memset(0);
+            InitDepthMapWithoutTriangulation(depthData, size);
+        }
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
         if (OPTDENSE::nMinViewsTrustPoint < 2) {
@@ -465,22 +470,14 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
       }
   }
 
-  // use warped depth as init confMap
-	cv::Mat mask_img(size.height, size.width, CV_32F);
-	cv::threshold(depthData.depthMap, mask_img, 0.0, 1.0, cv::THRESH_BINARY);
-	int kernel_size = (int)OPTDENSE::nPixelArea * 2 + 1;
-	auto kernel = cv::Mat::ones(kernel_size, kernel_size, CV_32F) / (float)(kernel_size*kernel_size);
-	cv::filter2D(mask_img, depthData.confMap, mask_img.depth(), kernel);
-
-#if TD_VERBOSE != TD_VERBOSE_OFF
-  // save rough depth map as image
-  if (g_nVerbosityLevel > 4) {
-    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-    ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-    ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-    ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+  if (OPTDENSE::importReferenceDepth) {
+    // use warped depth as init confMap
+    cv::Mat mask_img(size.height, size.width, CV_32F);
+    cv::threshold(depthData.depthMap, mask_img, 0.0, 1.0, cv::THRESH_BINARY);
+    int kernel_size = (int) OPTDENSE::nPixelArea * 2 + 1;
+    auto kernel = cv::Mat::ones(kernel_size, kernel_size, CV_32F) / (float) (kernel_size * kernel_size);
+    cv::filter2D(mask_img, depthData.confMap, mask_img.depth(), kernel);
   }
-#endif
 
 	// run gipuma to estimate depthMap and normalMap
 	{
@@ -492,61 +489,64 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
 		}
 
-		// cv::Mat_<float> depth_map;
-    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-    cv::Mat_<cv::Point3_<float>> normal_map(depthData.depthMap.height(), depthData.depthMap.width());
-      // cv::Mat_<cv::Point3_<float>>::zeros(depthData.depthMap.height(), depthData.depthMap.width());
-    int delta_x[] = {-1, 0, 1, 0};
-    int delta_y[] = {0, 1, 0, -1};
-    for (int y = 0 ; y < normal_map.rows; ++y) {
-      for (int x = 0; x < normal_map.cols; ++x) {
-        Point3f ic(x, y, depthData.depthMap(y, x));
-        Point3f pc0 =
-          depthData.images.First().camera.TransformPointI2C(ic);
-        Point3f normal(0, 0, 0);
-        float weight = 0;
-        for (int k = 0; k < 4; ++k) {
-          int x1 = x + delta_x[k];
-          int y1 = y + delta_y[k];
-          int x2 = x + delta_x[(k + 1) % 4];
-          int y2 = y + delta_y[(k + 1) % 4];
-          if (depthData.depthMap.isInside({x1, y1}) && depthData.depthMap.isInside({x2, y2})) {
-            Point3f ic1(x1, y1, depthData.depthMap(y1, x1));
-            Point3f ic2(x2, y2, depthData.depthMap(y2, x2));
-            Point3f pc1 =
-              depthData.images.First().camera.TransformPointI2C(ic1);
-            Point3f pc2 =
-              depthData.images.First().camera.TransformPointI2C(ic2);
+    const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+    cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap;
+    if (OPTDENSE::importReferenceDepth)
+    {
+      // init normal map
+      int delta_x[] = {-1, 0, 1, 0};
+      int delta_y[] = {0, 1, 0, -1};
+      for (int y = 0 ; y < normal_map.rows; ++y) {
+        for (int x = 0; x < normal_map.cols; ++x) {
+          Point3f ic(x, y, depthData.depthMap(y, x));
+          Point3f pc0 =
+                  depthData.images.First().camera.TransformPointI2C(ic);
+          Point3f normal(0, 0, 0);
+          float weight = 0;
+          for (int k = 0; k < 4; ++k) {
+            int x1 = x + delta_x[k];
+            int y1 = y + delta_y[k];
+            int x2 = x + delta_x[(k + 1) % 4];
+            int y2 = y + delta_y[(k + 1) % 4];
+            if (depthData.depthMap.isInside({x1, y1}) && depthData.depthMap.isInside({x2, y2})) {
+              Point3f ic1(x1, y1, depthData.depthMap(y1, x1));
+              Point3f ic2(x2, y2, depthData.depthMap(y2, x2));
+              Point3f pc1 =
+                      depthData.images.First().camera.TransformPointI2C(ic1);
+              Point3f pc2 =
+                      depthData.images.First().camera.TransformPointI2C(ic2);
 
-            Point3f edge1(pc1-pc0);
-            Point3f edge2(pc2-pc0);
-            Point3f tmp_normal = edge1.cross(edge2);
-            weight += norm(tmp_normal);
-            normal += tmp_normal;
+              Point3f edge1(pc1-pc0);
+              Point3f edge2(pc2-pc0);
+              Point3f tmp_normal = edge1.cross(edge2);
+              weight += norm(tmp_normal);
+              normal += tmp_normal;
+            }
           }
+          // if (weight > 0)
+          //   normal /= weight;
+          auto real_normal = normalized(normal);
+          normal_map(y, x) = cv::Point3_<float>(real_normal.x, real_normal.y, real_normal.z);
         }
-        // if (weight > 0)
-        //   normal /= weight;
-        auto real_normal = normalized(normal);
-        normal_map(y, x) = cv::Point3_<float>(real_normal.x, real_normal.y, real_normal.z);
       }
+
+      depthData.normalMap = TransformTImage(normal_map);
     }
-  	const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-	  depthData.normalMap = TransformTImage(normal_map);
-    ExportNormalMap(path + ".init.normal.png", depthData.normalMap);
-    std::string prefix(path);
-		gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
-      normal_map, depthData.dMin, depthData.dMax,
-			OPTDENSE::paramsFile.c_str());
+
+#if TD_VERBOSE != TD_VERBOSE_OFF
+  // save rough depth map as image
+  if (g_nVerbosityLevel > 4) {
+    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+    ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+    ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+    ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+  }
+#endif
+
+    gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
+                       normal_map, depthData.dMin, depthData.dMax,
+                       OPTDENSE::paramsFile.c_str());
     depthData.normalMap = TransformTImage(normal_map);
-    depthData.normalMap.Save(path + ".normal.pfm");
-    ExportNormalMap(path + ".normal.png", depthData.normalMap);
-    depthData.depthMap.Save(path + ".depth.pfm");
-    // depthData.normalMap.Save(path + ".normal.pfm");
-
-		// GipumaMain(images, projection_matrices, depthData.depthMap, normal_map, depthData.dMin, depthData.dMax, OPTDENSE::paramsFile.c_str());
-		// depthData.depthMap = depth_map;
-
 
 #if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
@@ -1120,9 +1120,11 @@ void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
 		Normal& normal = estimator.normalMap0(x);
 		const Normal viewDir(Cast<float>(static_cast<const Point3&>(estimator.X0)));
 		if (depth <= 0) {
-			// init with random values
-			depth = DepthEstimator::RandomDepth(estimator.dMin, estimator.dMax);
-			normal = DepthEstimator::RandomNormal(viewDir);
+			// invalid
+			depth = 0;
+			normal = Normal::ZERO;
+			estimator.confMap0(x) = DepthEstimator::EncodeScoreScale(2.f);
+			continue;
 		} else if (normal.dot(viewDir) >= 0) {
 			// replace invalid normal with random values
 			normal = DepthEstimator::RandomNormal(viewDir);
@@ -1262,9 +1264,14 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
-				//todo by dushuai
         // reference depth map already loaded
-        InitDepthMapWithoutTriangulation(depthData, size);
+        if (OPTDENSE::updateReferenceDepthWithPoints) {
+            InitDepthMapWithoutTriangulation(depthData, size, true);
+        }
+        else if (depthData.depthMap.empty()) {
+            depthData.depthMap.create(size); depthData.depthMap.memset(0);
+            InitDepthMapWithoutTriangulation(depthData, size);
+        }
     } else {
         depthData.depthMap.create(size); depthData.depthMap.memset(0);
         if (OPTDENSE::nMinViewsTrustPoint < 2) {
@@ -2435,7 +2442,6 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			if (exportDmapOnly)
 				depthData.depthMap.Save(ComposeDepthFilePath(idx, "raw.pfm"));
 			depthData.Save(ComposeDepthFilePath(idx, "dmap"));
-			ExportPointCloud(ComposeDepthFilePath(idx, "ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 			depthData.ReleaseImages();
 			depthData.Release();
 			data.progress->operator++();
