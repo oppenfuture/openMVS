@@ -171,7 +171,7 @@ static void selectViews (CameraParameters &cameraParams, int imgWidth, int imgHe
         algParams.depthMax = max_depth;
 
     if (!algParams.viewSelection) {
-        cameraParams.viewSelectionSubset.clear();
+        cameraParams.viewSelectionSubset.clear();  // ?
         for ( size_t i = 1; i < cameras.size (); i++ )
             cameraParams.viewSelectionSubset.push_back ( i );
         return;
@@ -449,6 +449,7 @@ bool runGipuma(
         savePfm(images[0], prefix + ".0.gray.pfm");
         out.close();
     }
+#endif
 
     for ( int i = 0; i < numSelViews; i++ ) {
         gs->cameras->viewSelectionSubset[i] = cameraParams.viewSelectionSubset[i];

@@ -1073,8 +1073,13 @@ bool DepthMapsData::InitDepthMapByRealsense(DepthData& depthData, const std::str
 	// load realsense depth
   depthData.depthMap.Load(GetDir(image.name) + ref_filename.get<std::string>());
 
-  std::vector<std::vector<float> > intrinsics = view_params["intrinsics"];
-  std::vector<std::vector<float> > extrinsics = view_params["extrinsics"];
+  std::vector<std::vector<float> > intrinsics;
+  std::vector<std::vector<float> > extrinsics;
+  if (view_params.find("intrinsics") != view_params.end())
+    intrinsics = view_params["intrinsics"].get<decltype(intrinsics)>();
+  if (view_params.find("extrinsics") != view_params.end())
+    extrinsics = view_params["extrinsics"].get<decltype(extrinsics)>();
+
   if (intrinsics.empty())
     intrinsics = {
       {1383.5141750796581, 0.0, 960.0},
