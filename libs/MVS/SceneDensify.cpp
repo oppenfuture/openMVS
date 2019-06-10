@@ -489,15 +489,13 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
 			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
 		}
 
-    const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-    cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap;
     if (OPTDENSE::importReferenceDepth)
     {
       // init normal map
       int delta_x[] = {-1, 0, 1, 0};
       int delta_y[] = {0, 1, 0, -1};
-      for (int y = 0 ; y < normal_map.rows; ++y) {
-        for (int x = 0; x < normal_map.cols; ++x) {
+      for (int y = 0 ; y < depthData.normalMap.rows; ++y) {
+        for (int x = 0; x < depthData.normalMap.cols; ++x) {
           Point3f ic(x, y, depthData.depthMap(y, x));
           Point3f pc0 =
                   depthData.images.First().camera.TransformPointI2C(ic);
@@ -523,14 +521,9 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
               normal += tmp_normal;
             }
           }
-          // if (weight > 0)
-          //   normal /= weight;
-          auto real_normal = normalized(normal);
-          normal_map(y, x) = cv::Point3_<float>(real_normal.x, real_normal.y, real_normal.z);
+          depthData.normalMap(y, x) = normalized(normal);
         }
       }
-
-      depthData.normalMap = TransformTImage(normal_map);
     }
 
 #if TD_VERBOSE != TD_VERBOSE_OFF
@@ -542,16 +535,15 @@ bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
     ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
   }
 #endif
-
+    const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+    cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap; // no deep copy
     gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
                        normal_map, depthData.dMin, depthData.dMax,
                        OPTDENSE::paramsFile.c_str());
-    depthData.normalMap = TransformTImage(normal_map);
 
 #if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
 		if (g_nVerbosityLevel > 4) {
-			const String path(ComposeDepthFilePath(idxImage, "gipuma"));
 			depthData.depthMap.Save(path + ".depth.pfm");
       depthData.confMap.Save(path + ".conf.pfm");
 			depthData.normalMap.Save(path + ".normal.pfm");
