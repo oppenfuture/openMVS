@@ -135,8 +135,8 @@ public:
 	bool InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex numNeighbors);
 	bool InitDepthMap(DepthData& depthData);
 	bool EstimateDepthMap(IIndex idxImage);
-	bool GipumaEstimate(IIndex idxImage);
-	bool NoPatchMatch(IIndex idxImage);
+	bool CpuPatchMatch(IIndex idxImage, cList<SEACAVE::Thread> &threads, Image64F imageSum0, cList<DepthEstimator> &estimators);
+	bool GipumaPatchMatch(IIndex idxImage, const Image8U::Size &size, DepthData &depthData);
 
 	bool RemoveSmallSegments(DepthData& depthData);
 	bool GapInterpolation(DepthData& depthData);
@@ -307,337 +307,6 @@ namespace MVS {
   }
 } // namespace MVS
 /****************************************************************/
-
-/****************************************************************/
-bool DepthMapsData::NoPatchMatch(IIndex idxImage) {
-	TD_TIMER_STARTD();
-
-    // initialize depth and normal maps
-    DepthData& depthData(arrDepthData[idxImage]);
-    ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
-    const DepthData::ViewData& image(depthData.images.First());
-    ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
-    const Image8U::Size size(image.image.size());
-    depthData.normalMap.create(size);
-    depthData.confMap.create(size);
-    const unsigned nMaxThreads(scene.nMaxThreads);
-
-    // initialize the depth-map
-    if (OPTDENSE::importReferenceDepth) {
-        // reference depth map already loaded
-        if (OPTDENSE::updateReferenceDepthWithPoints) {
-            InitDepthMapWithoutTriangulation(depthData, size, true);
-        }
-        else if (depthData.depthMap.empty()) {
-            depthData.depthMap.create(size); depthData.depthMap.memset(0);
-            InitDepthMapWithoutTriangulation(depthData, size);
-        }
-    } else {
-        depthData.depthMap.create(size); depthData.depthMap.memset(0);
-        if (OPTDENSE::nMinViewsTrustPoint < 2) {
-            InitDepthMapWithoutTriangulation(depthData, size);
-        } else {
-            // compute rough estimates using the sparse point-cloud
-            InitDepthMap(depthData);
-        }
-    }
-#if TD_VERBOSE != TD_VERBOSE_OFF
-    // save rough depth map as image
-    if (g_nVerbosityLevel > 4) {
-        depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-        ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-        ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-        ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-    }
-#endif
-
-// init integral images and index to image-ref map for the reference data
-	Image64F imageSum0;
-	cv::integral(image.image, imageSum0, CV_64F);
-	// if (prevDepthMapSize != size) {
-	// 	prevDepthMapSize = size;
-	// 	BitMatrix mask;
-	// 	DepthEstimator::MapMatrix2ZigzagIdx(size, coords, mask, MAXF(64,(int)nMaxThreads*8));
-	// }
-
-	// init threads
-	ASSERT(nMaxThreads > 0);
-	cList<DepthEstimator> estimators;
-	estimators.Reserve(nMaxThreads);
-	cList<SEACAVE::Thread> threads;
-	if (nMaxThreads > 1)
-		threads.Resize(nMaxThreads-1); // current thread is also used
-	volatile Thread::safe_t idxPixel;
-
-	// compute confMap
-	{
-		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::RB2LT);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(ScoreDepthMapTmp, &estimators[i]);
-		ScoreDepthMapTmp(&estimators.Last());
-		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-
-		estimators.Release();
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-		// save rough depth map as image
-		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "score.depth.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "score.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "score.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "score.conf.png"), depthData.confMap);
-			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "score.conf.pfm"));
-		}
-	#endif
-	}
-
-	// remove all estimates with too big score and invert confidence map
-	{
-		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::DIRS);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(EndDepthMapTmp, &estimators[i]);
-		EndDepthMapTmp(&estimators.Last());
-		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-		estimators.Release();
-
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-		// save reduce depth map as image
-		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "reduce.depth.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "reduce.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "reduce.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "reduce.conf.png"), depthData.confMap);
-			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "reduce.conf.pfm"));
-		}
-	#endif
-	}
-
-	DEBUG_EXTRA("Depth-map for image %3u %s: %dx%d (%s)", image.pImageData-scene.images.Begin(),
-				depthData.images.GetSize() > 2 ?
-				String::FormatString("estimated using %2u images", depthData.images.GetSize()-1).c_str() :
-				String::FormatString("with image %3u estimated", depthData.images[1].pImageData-scene.images.Begin()).c_str(),
-				size.width, size.height, TD_TIMER_GET_FMT().c_str());
-
-	return true;
-}
-
-/****************************************************************/
-
-/****************************************************************/
-bool DepthMapsData::GipumaEstimate(IIndex idxImage) {
-	TD_TIMER_STARTD();
-
-  // initialize depth and normal maps
-  DepthData& depthData(arrDepthData[idxImage]);
-  ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
-  const DepthData::ViewData& image(depthData.images.First());
-  ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
-  const Image8U::Size size(image.image.size());
-  depthData.normalMap.create(size);
-  depthData.confMap.create(size);
-  const unsigned nMaxThreads(scene.nMaxThreads);
-
-  // initialize the depth-map
-  if (OPTDENSE::importReferenceDepth) {
-    // reference depth map already loaded
-		if (OPTDENSE::updateReferenceDepthWithPoints) {
-			InitDepthMapWithoutTriangulation(depthData, size, true);
-		}
-    else if (depthData.depthMap.empty()) {
-      depthData.depthMap.create(size); depthData.depthMap.memset(0);
-      InitDepthMapWithoutTriangulation(depthData, size);
-    }
-  } else {
-      depthData.depthMap.create(size); depthData.depthMap.memset(0);
-      if (OPTDENSE::nMinViewsTrustPoint < 2) {
-        InitDepthMapWithoutTriangulation(depthData, size);
-      } else {
-        // compute rough estimates using the sparse point-cloud
-        InitDepthMap(depthData);
-      }
-  }
-
-  if (OPTDENSE::importReferenceDepth) {
-    // use warped depth as init confMap
-    cv::Mat mask_img(size.height, size.width, CV_32F);
-    cv::threshold(depthData.depthMap, mask_img, 0.0, 1.0, cv::THRESH_BINARY);
-    int kernel_size = (int) OPTDENSE::nPixelArea * 2 + 1;
-    auto kernel = cv::Mat::ones(kernel_size, kernel_size, CV_32F) / (float) (kernel_size * kernel_size);
-    cv::filter2D(mask_img, depthData.confMap, mask_img.depth(), kernel);
-  }
-
-	// run gipuma to estimate depthMap and normalMap
-	{
-		int numberOfImages = depthData.images.GetSize();
-		std::vector<cv::Mat_<float>> images(numberOfImages);
-		std::vector<cv::Mat_<float>> projection_matrices(numberOfImages);
-		for (int i = 0; i < numberOfImages; ++i) {
-			images[i] = depthData.images[i].image;
-			projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
-		}
-
-    if (OPTDENSE::importReferenceDepth)
-    {
-      // init normal map
-      int delta_x[] = {-1, 0, 1, 0};
-      int delta_y[] = {0, 1, 0, -1};
-      for (int y = 0 ; y < depthData.normalMap.rows; ++y) {
-        for (int x = 0; x < depthData.normalMap.cols; ++x) {
-          Point3f ic(x, y, depthData.depthMap(y, x));
-          Point3f pc0 =
-                  depthData.images.First().camera.TransformPointI2C(ic);
-          Point3f normal(0, 0, 0);
-          float weight = 0;
-          for (int k = 0; k < 4; ++k) {
-            int x1 = x + delta_x[k];
-            int y1 = y + delta_y[k];
-            int x2 = x + delta_x[(k + 1) % 4];
-            int y2 = y + delta_y[(k + 1) % 4];
-            if (depthData.depthMap.isInside({x1, y1}) && depthData.depthMap.isInside({x2, y2})) {
-              Point3f ic1(x1, y1, depthData.depthMap(y1, x1));
-              Point3f ic2(x2, y2, depthData.depthMap(y2, x2));
-              Point3f pc1 =
-                      depthData.images.First().camera.TransformPointI2C(ic1);
-              Point3f pc2 =
-                      depthData.images.First().camera.TransformPointI2C(ic2);
-
-              Point3f edge1(pc1-pc0);
-              Point3f edge2(pc2-pc0);
-              Point3f tmp_normal = edge1.cross(edge2);
-              weight += norm(tmp_normal);
-              normal += tmp_normal;
-            }
-          }
-          depthData.normalMap(y, x) = normalized(normal);
-        }
-      }
-    }
-
-#if TD_VERBOSE != TD_VERBOSE_OFF
-  // save rough depth map as image
-  if (g_nVerbosityLevel > 4) {
-    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-    ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-    ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-    ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-  }
-#endif
-    const String path(ComposeDepthFilePath(idxImage, "gipuma"));
-    cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap; // no deep copy
-    gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
-                       normal_map, depthData.dMin, depthData.dMax,
-                       OPTDENSE::paramsFile.c_str());
-
-#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
-		// save intermediate depth map as image
-		if (g_nVerbosityLevel > 4) {
-			depthData.depthMap.Save(path + ".depth.pfm");
-      depthData.confMap.Save(path + ".conf.pfm");
-			depthData.normalMap.Save(path + ".normal.pfm");
-			ExportDepthMap(path + ".png", depthData.depthMap);
-			ExportNormalMap(path + ".normal.png", depthData.normalMap);
-			ExportPointCloud(path + ".ply", *depthData.images.First().pImageData, depthData.depthMap,
-							 depthData.normalMap);
-		}
-#endif
-	}
-
-	// init integral images and index to image-ref map for the reference data
-	Image64F imageSum0;
-	cv::integral(image.image, imageSum0, CV_64F);
-	// if (prevDepthMapSize != size) {
-	// 	prevDepthMapSize = size;
-	// 	BitMatrix mask;
-	// 	DepthEstimator::MapMatrix2ZigzagIdx(size, coords, mask, MAXF(64,(int)nMaxThreads*8));
-	// }
-
-	// init threads
-	ASSERT(nMaxThreads > 0);
-	cList<DepthEstimator> estimators;
-	estimators.Reserve(nMaxThreads);
-	cList<SEACAVE::Thread> threads;
-	if (nMaxThreads > 1)
-		threads.Resize(nMaxThreads-1); // current thread is also used
-	volatile Thread::safe_t idxPixel;
-
-	// compute confMap
-	{
-		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::RB2LT);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(ScoreDepthMapTmp, &estimators[i]);
-		ScoreDepthMapTmp(&estimators.Last());
-		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-
-		estimators.Release();
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-		// save rough depth map as image
-		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "score.depth.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "score.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "score.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "score.conf.png"), depthData.confMap);
-			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "score.conf.pfm"));
-		}
-	#endif
-	}
-
-	// remove all estimates with too big score and invert confidence map
-	{
-		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::DIRS);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(EndDepthMapTmp, &estimators[i]);
-		EndDepthMapTmp(&estimators.Last());
-		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-		estimators.Release();
-
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-		// save reduce depth map as image
-		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "reduce.depth.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "reduce.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "reduce.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "reduce.conf.png"), depthData.confMap);
-			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "reduce.conf.pfm"));
-		}
-	#endif
-	}
-
-	DEBUG_EXTRA("Depth-map for image %3u %s: %dx%d (%s)", image.pImageData-scene.images.Begin(),
-				depthData.images.GetSize() > 2 ?
-				String::FormatString("estimated using %2u images", depthData.images.GetSize()-1).c_str() :
-				String::FormatString("with image %3u estimated", depthData.images[1].pImageData-scene.images.Begin()).c_str(),
-				size.width, size.height, TD_TIMER_GET_FMT().c_str());
-
-	return true;
-} // GipumaEstimate
-/******************************************************/
 
 DepthMapsData::DepthMapsData(Scene& _scene)
 	:
@@ -1233,6 +902,7 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 	return true;
 }
 
+// cpu patch match:
 // estimate depth-map using propagation and random refinement with NCC score
 // as in: "Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes", S. Shen, 2013
 // The implementations follows closely the paper, although there are some changes/additions.
@@ -1245,8 +915,17 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 // For each pixel, the depth and normal are scored by computing the NCC score between the patch in the reference image and the wrapped patch in the target image, as dictated by the homography matrix defined by the current values to be estimate.
 // In order to ensure some smoothness while locally estimating each pixel, a bonus is added to the NCC score if the estimate for this pixel is close to the estimates for the neighbor pixels.
 // Optionally, the occluded pixels can be detected by extending the described iterations to the target image and removing the estimates that do not have similar values in both views.
+//
+// gipuma patch match:
+// use gipuma to estimate depth-map
+//
+// no patch match:
+// use initialization as the estimated depth-map
 bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 {
+	#define TD_VERBOSE 100
+	g_nVerbosityLevel = 10;
+
 	TD_TIMER_STARTD();
 
 	// initialize depth and normal maps
@@ -1278,15 +957,22 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
             InitDepthMap(depthData);
         }
     }
-#if TD_VERBOSE != TD_VERBOSE_OFF
-    // save rough depth map as image
-    if (g_nVerbosityLevel > 4) {
-        depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
-        ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
-        ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
-        ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+
+    if (OPTDENSE::algorithm == 0) {
+        if (!GipumaPatchMatch(idxImage, size, depthData))
+            return false;
     }
+    else {
+#if TD_VERBOSE != TD_VERBOSE_OFF
+        // save rough depth map as image
+        if (g_nVerbosityLevel > 4) {
+            depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+            ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+            ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+            ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+        }
 #endif
+    }
 
 	// init integral images and index to image-ref map for the reference data
 	Image64F imageSum0;
@@ -1306,7 +992,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		threads.Resize(nMaxThreads-1); // current thread is also used
 	volatile Thread::safe_t idxPixel;
 
-	// initialize the reference confidence map (NCC score map) with the score of the current estimates
+	// compute the reference confidence map (NCC score map) with the score of the current estimates
 	{
 		// create working threads
 		idxPixel = -1;
@@ -1320,18 +1006,169 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		// wait for the working threads to close
 		FOREACHPTR(pThread, threads)
 			pThread->join();
+
 		estimators.Release();
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		// save rough depth map as image
 		if (g_nVerbosityLevel > 4) {
-			ExportDepthMap(ComposeDepthFilePath(idxImage, "rough.png"), depthData.depthMap);
-			ExportNormalMap(ComposeDepthFilePath(idxImage, "rough.normal.png"), depthData.normalMap);
-			ExportPointCloud(ComposeDepthFilePath(idxImage, "rough.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+			ExportDepthMap(ComposeDepthFilePath(idxImage, "score.depth.png"), depthData.depthMap);
+			ExportNormalMap(ComposeDepthFilePath(idxImage, "score.normal.png"), depthData.normalMap);
+			ExportPointCloud(ComposeDepthFilePath(idxImage, "score.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "score.conf.png"), depthData.confMap);
+			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "score.conf.pfm"));
 		}
 		#endif
 	}
 
-	// run propagation and random refinement cycles on the reference data
+	if (OPTDENSE::algorithm == 1)
+		if (!CpuPatchMatch(idxImage, threads, imageSum0, estimators))
+		    return false;
+
+	if (g_nVerbosityLevel > 4) {
+		const String path(ComposeDepthFilePath(image.pImageData-scene.images.Begin(), "iter"));
+		depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "iter.depth.pfm"));
+		depthData.normalMap.Save(ComposeDepthFilePath(idxImage, "iter.normal.pfm"));
+		depthData.confMap.Save(ComposeDepthFilePath(idxImage, "iter.conf.pfm"));
+		ExportDepthMap(path+".png", depthData.depthMap);
+		ExportNormalMap(path+".normal.png", depthData.normalMap);
+		ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+	}
+
+	// remove all estimates with too big score and invert confidence map
+	{
+		// create working threads
+		idxPixel = -1;
+		ASSERT(estimators.IsEmpty());
+		while (estimators.GetSize() < nMaxThreads)
+			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::DIRS);
+		ASSERT(estimators.GetSize() == threads.GetSize()+1);
+		FOREACH(i, threads)
+			threads[i].start(EndDepthMapTmp, &estimators[i]);
+		EndDepthMapTmp(&estimators.Last());
+		// wait for the working threads to close
+		FOREACHPTR(pThread, threads)
+			pThread->join();
+		estimators.Release();
+
+	#if TD_VERBOSE != TD_VERBOSE_OFF
+		// save reduce depth map as image
+		if (g_nVerbosityLevel > 4) {
+			ExportDepthMap(ComposeDepthFilePath(idxImage, "reduce.depth.png"), depthData.depthMap);
+			ExportNormalMap(ComposeDepthFilePath(idxImage, "reduce.normal.png"), depthData.normalMap);
+			ExportPointCloud(ComposeDepthFilePath(idxImage, "reduce.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+			ExportConfidenceMap(ComposeDepthFilePath(idxImage, "reduce.conf.png"), depthData.confMap);
+			depthData.confMap.Save(ComposeDepthFilePath(idxImage, "reduce.conf.pfm"));
+		}
+	#endif
+	}
+
+	DEBUG_EXTRA("Depth-map for image %3u %s: %dx%d (%s)", image.pImageData-scene.images.Begin(),
+		depthData.images.GetSize() > 2 ?
+			String::FormatString("estimated using %2u images", depthData.images.GetSize()-1).c_str() :
+			String::FormatString("with image %3u estimated", depthData.images[1].pImageData-scene.images.Begin()).c_str(),
+		size.width, size.height, TD_TIMER_GET_FMT().c_str());
+
+	return true;
+} // EstimateDepthMap
+/*----------------------------------------------------------------*/
+
+bool DepthMapsData::GipumaPatchMatch(IIndex idxImage, const Image8U::Size &size, DepthData &depthData)
+{
+    if (OPTDENSE::importReferenceDepth) {
+        // use warped depth as init confMap
+        cv::Mat mask_img(size.height, size.width, CV_32F);
+        cv::threshold(depthData.depthMap, mask_img, 0.0, 1.0, cv::THRESH_BINARY);
+        int kernel_size = (int) OPTDENSE::nPixelArea * 2 + 1;
+        auto kernel = cv::Mat::ones(kernel_size, kernel_size, CV_32F) / (float) (kernel_size * kernel_size);
+        cv::filter2D(mask_img, depthData.confMap, mask_img.depth(), kernel);
+    }
+
+    // run gipuma to estimate depthMap and normalMap
+    {
+        int numberOfImages = depthData.images.GetSize();
+        std::vector<cv::Mat_<float>> images(numberOfImages);
+        std::vector<cv::Mat_<float>> projection_matrices(numberOfImages);
+        for (int i = 0; i < numberOfImages; ++i) {
+            images[i] = depthData.images[i].image;
+            projection_matrices[i] = MatxtoMat(depthData.images[i].camera.P);
+        }
+
+        if (OPTDENSE::importReferenceDepth)
+        {
+            // init normal map
+            int delta_x[] = {-1, 0, 1, 0};
+            int delta_y[] = {0, 1, 0, -1};
+            for (int y = 0 ; y < depthData.normalMap.rows; ++y) {
+                for (int x = 0; x < depthData.normalMap.cols; ++x) {
+                    Point3f ic(x, y, depthData.depthMap(y, x));
+                    Point3f pc0 =
+                            depthData.images.First().camera.TransformPointI2C(ic);
+                    Point3f normal(0, 0, 0);
+                    float weight = 0;
+                    for (int k = 0; k < 4; ++k) {
+                        int x1 = x + delta_x[k];
+                        int y1 = y + delta_y[k];
+                        int x2 = x + delta_x[(k + 1) % 4];
+                        int y2 = y + delta_y[(k + 1) % 4];
+                        if (depthData.depthMap.isInside({x1, y1}) && depthData.depthMap.isInside({x2, y2})) {
+                            Point3f ic1(x1, y1, depthData.depthMap(y1, x1));
+                            Point3f ic2(x2, y2, depthData.depthMap(y2, x2));
+                            Point3f pc1 =
+                                    depthData.images.First().camera.TransformPointI2C(ic1);
+                            Point3f pc2 =
+                                    depthData.images.First().camera.TransformPointI2C(ic2);
+
+                            Point3f edge1(pc1-pc0);
+                            Point3f edge2(pc2-pc0);
+                            Point3f tmp_normal = edge1.cross(edge2);
+                            weight += norm(tmp_normal);
+                            normal += tmp_normal;
+                        }
+                    }
+                    depthData.normalMap(y, x) = normalized(normal);
+                }
+            }
+        }
+
+#if TD_VERBOSE != TD_VERBOSE_OFF
+        // save rough depth map as image
+  if (g_nVerbosityLevel > 4) {
+    depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "init.pfm"));
+    ExportDepthMap(ComposeDepthFilePath(idxImage, "init.png"), depthData.depthMap);
+    ExportNormalMap(ComposeDepthFilePath(idxImage, "init.normal.png"), depthData.normalMap);
+    ExportPointCloud(ComposeDepthFilePath(idxImage, "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+  }
+#endif
+        const String path(ComposeDepthFilePath(idxImage, "gipuma"));
+        cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap; // no deep copy
+        gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
+                           normal_map, depthData.dMin, depthData.dMax,
+                           OPTDENSE::paramsFile.c_str());
+
+#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
+        // save intermediate depth map as image
+		if (g_nVerbosityLevel > 4) {
+			depthData.depthMap.Save(path + ".depth.pfm");
+      depthData.confMap.Save(path + ".conf.pfm");
+			depthData.normalMap.Save(path + ".normal.pfm");
+			ExportDepthMap(path + ".png", depthData.depthMap);
+			ExportNormalMap(path + ".normal.png", depthData.normalMap);
+			ExportPointCloud(path + ".ply", *depthData.images.First().pImageData, depthData.depthMap,
+							 depthData.normalMap);
+		}
+#endif
+    }
+
+    return true;
+}
+
+bool DepthMapsData::CpuPatchMatch(IIndex idxImage, cList<SEACAVE::Thread> &threads, Image64F imageSum0, cList<DepthEstimator> &estimators)
+{
+    DepthData& depthData(arrDepthData[idxImage]);
+    const DepthData::ViewData& image(depthData.images.First());
+    const unsigned nMaxThreads(scene.nMaxThreads);
+    volatile Thread::safe_t idxPixel;
+    // run propagation and random refinement cycles on the reference data
 	for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
 		// create working threads
 		const DepthEstimator::ENDIRECTION dir((DepthEstimator::ENDIRECTION)(iter%DepthEstimator::DIRS));
@@ -1360,41 +1197,8 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		#endif
 	}
 
-	if (g_nVerbosityLevel > 4) {
-		const String path(ComposeDepthFilePath(image.pImageData-scene.images.Begin(), "iter"));
-		depthData.depthMap.Save(ComposeDepthFilePath(idxImage, "iter.depth.pfm"));
-		depthData.normalMap.Save(ComposeDepthFilePath(idxImage, "iter.normal.pfm"));
-		depthData.confMap.Save(ComposeDepthFilePath(idxImage, "iter.conf.pfm"));
-		ExportDepthMap(path+".png", depthData.depthMap);
-		ExportNormalMap(path+".normal.png", depthData.normalMap);
-		ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-	}
-
-	// remove all estimates with too big score and invert confidence map
-	{
-		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(depthData, idxPixel, imageSum0, DepthEstimator::DIRS);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(EndDepthMapTmp, &estimators[i]);
-		EndDepthMapTmp(&estimators.Last());
-		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-		estimators.Release();
-	}
-
-	DEBUG_EXTRA("Depth-map for image %3u %s: %dx%d (%s)", image.pImageData-scene.images.Begin(),
-		depthData.images.GetSize() > 2 ?
-			String::FormatString("estimated using %2u images", depthData.images.GetSize()-1).c_str() :
-			String::FormatString("with image %3u estimated", depthData.images[1].pImageData-scene.images.Begin()).c_str(),
-		size.width, size.height, TD_TIMER_GET_FMT().c_str());
 	return true;
-} // EstimateDepthMap
-/*----------------------------------------------------------------*/
+}
 
 
 // filter out small depth segments from the given depth map
@@ -2376,13 +2180,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				DepthData& depthData(data.detphMaps.arrDepthData[idx]);
         data.detphMaps.InitDepthMapByRealsense(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
       }
-			if (OPTDENSE::algorithm == 0) {
-				data.detphMaps.GipumaEstimate(data.images[evtImage.idxImage]);
-			} else if (OPTDENSE::algorithm == 1) {
-				data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
-			} else if (OPTDENSE::algorithm == 2) {
-				data.detphMaps.NoPatchMatch(data.images[evtImage.idxImage]);
-			}
+            data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
 			data.sem.Signal();
 			if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {
 				// optimize depth-map
