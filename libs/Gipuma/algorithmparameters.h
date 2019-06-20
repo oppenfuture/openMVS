@@ -41,14 +41,14 @@ struct AlgorithmParameters : public Managed{
         num_img_processed  (1), //number of images that are processed as reference images
         costThresh         (40.0f), // threshold to decide whether disparity/depth is valid or not
         good_factor        (1.5f), // for cost aggregation/combination good: factor for truncation CUDA
-        n_best             (2), // CUDA
+        n_best             (3), // CUDA
         cost_comb          (1), // CUDA
         viewSelection      (false), // Default has to be false, or user has no way to disable view selection
         depthMin           (-1.0f), // CUDA
         depthMax           (-1.0f), // CUDA
         min_angle          (5.0f), // CUDA
         max_angle          (45.0f), // CUDA
-        no_texture_sim     (0.9f), // CUDA
+        no_texture_sim     (0.997f), // CUDA
         no_texture_per     (0.6f), // CUDA
         max_views          (9) {}
     int algorithm; // algorithm cost type

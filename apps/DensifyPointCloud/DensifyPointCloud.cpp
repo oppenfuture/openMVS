@@ -55,9 +55,14 @@ unsigned nMaxThreads;
 String strConfigFileName;
 boost::program_options::variables_map vm;
 bool exportDmapOnly;
+bool importReferenceDepth;
+bool updateReferenceDepthWithPoints;
+bool forceRecompute;
+unsigned nPixelArea;
 String strParamsFileName;
 int algorithm;
 float fNCCThresholdKeep;
+String strRealsenseFileName;
 } // namespace OPT
 
 // initialize and parse the command line parameters
@@ -72,14 +77,19 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	generic.add_options()
 		("help,h", "produce this help message")
 		("working-folder,w", boost::program_options::value<std::string>(&WORKING_FOLDER), "working directory (default current directory)")
-		("params-file,p", boost::program_options::value<std::string>(&OPT::strParamsFileName)->default_value("params.txt"), "filename containing gipuma parameters")
-		("algorithm,u",boost::program_options::value(&OPT::algorithm)->default_value(1),"use algorithm to estimate depth (0-mvs, 1-gipuma)")
-		("fNCCThresholdKeep,n",boost::program_options::value(&OPT::fNCCThresholdKeep)->default_value(0.5),"default 0.5")
+		("gipuma-params-file,g", boost::program_options::value<std::string>(&OPT::strParamsFileName)->default_value("gipuma_params.txt"), "filename containing gipuma parameters")
+		("realsense-warp-data,r", boost::program_options::value<std::string>(&OPT::strRealsenseFileName)->default_value("realsense_warp_data.json"), "containing realsense to rgb warp matrix")
+		("algorithm,u",boost::program_options::value(&OPT::algorithm)->default_value(0),"use algorithm to estimate depth (2-nopatchmatch, 1-mvs, 0-gipuma)")
+		("fNCCThresholdKeep,n",boost::program_options::value(&OPT::fNCCThresholdKeep)->default_value(1),"default 1")
 		("config-file,c", boost::program_options::value<std::string>(&OPT::strConfigFileName)->default_value(APPNAME _T(".cfg")), "file name containing program options")
 		("archive-type", boost::program_options::value(&OPT::nArchiveType)->default_value(2), "project archive type: 0-text, 1-binary, 2-compressed binary")
 		("process-priority", boost::program_options::value(&OPT::nProcessPriority)->default_value(-1), "process priority (below normal by default)")
 		("export-dmap-only",boost::program_options::value(&OPT::exportDmapOnly)->default_value(false),"only export *.Dmap and *.raw.pfm file")
 		("max-threads", boost::program_options::value(&OPT::nMaxThreads)->default_value(0), "maximum number of threads (0 for using all available cores)")
+		("import-reference-depth,d", boost::program_options::value<bool>(&OPT::importReferenceDepth)->default_value(false), "import reference depth for patch match or not(false as default)")
+		("update-reference-depth,D", boost::program_options::value<bool>(&OPT::updateReferenceDepthWithPoints)->default_value(true), "update reference depth using sparse points or not(true as default)")
+		("force-recompute,f", boost::program_options::value<bool>(&OPT::forceRecompute)->default_value(false), "force recompute depth value for each view")
+		("pixelarea,p", boost::program_options::value<unsigned>(&OPT::nPixelArea)->default_value(3), "half windows size around a pixel to be initialize with the known depth")
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		("verbosity,v", boost::program_options::value(&g_nVerbosityLevel)->default_value(
 			#if TD_VERBOSE == TD_VERBOSE_DEBUG
@@ -179,9 +189,14 @@ bool Initialize(size_t argc, LPCTSTR* argv)
 	OPTDENSE::nMinViewsFuse = nMinViewsFuse;
 	OPTDENSE::nEstimateColors = nEstimateColors;
 	OPTDENSE::nEstimateNormals = nEstimateNormals;
+	OPTDENSE::importReferenceDepth = OPT::importReferenceDepth;
+	OPTDENSE::updateReferenceDepthWithPoints = OPT::updateReferenceDepthWithPoints;
+	OPTDENSE::forceRecompute = OPT::forceRecompute;
+	OPTDENSE::nPixelArea = OPT::nPixelArea;
 	OPTDENSE::paramsFile = MAKE_PATH_SAFE(OPT::strParamsFileName);
 	OPTDENSE::algorithm = OPT::algorithm;
 	OPTDENSE::fNCCThresholdKeep = OPT::fNCCThresholdKeep;
+	OPTDENSE::strRealsenseFileName = MAKE_PATH_SAFE(OPT::strRealsenseFileName);
 	if (!bValidConfig)
 		OPTDENSE::oConfig.Save(OPT::strDenseConfigFileName);
 

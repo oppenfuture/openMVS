@@ -99,8 +99,13 @@ MDEFVAR_OPTDENSE_float(fRandomAngle2Range, "Random Angle2 Range", "Angle 2 range
 MDEFVAR_OPTDENSE_float(fRandomSmoothDepth, "Random Smooth Depth", "Depth variance used during neighbor smoothness assignment (ratio)", "0.006")
 MDEFVAR_OPTDENSE_float(fRandomSmoothNormal, "Random Smooth Normal", "Normal variance used during neighbor smoothness assignment (degrees)", "8.5")
 MDEFVAR_OPTDENSE_float(fRandomSmoothBonus, "Random Smooth Bonus", "Score factor used to encourage smoothness (1 - disabled)", "0.9")
-MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "params.txt")
-MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "0", "1")
+MDEFVAR_OPTDENSE_bool(importReferenceDepth, "Estimate with reference depth", "should we estimate depthmap with reference", "1")
+MDEFVAR_OPTDENSE_bool(updateReferenceDepthWithPoints, "Update reference depth", "should we update depthmap with points depth", "1")
+MDEFVAR_OPTDENSE_bool(forceRecompute, "Force recompute", "force to recompute depth value", "0")
+MDEFVAR_OPTDENSE_uint32(nPixelArea, "half window size", "half windows size around a pixel to be initialize with the known depth", "3")
+MDEFVAR_OPTDENSE_string(paramsFile, "Gipuma params", "Gipuma params file", "gipuma_params.txt")
+MDEFVAR_OPTDENSE_int32(algorithm, "Select algorithm to estimate depth", "use mvs or gipuma", "1", "0")
+MDEFVAR_OPTDENSE_string(strRealsenseFileName, "realsense to rgb warp matrix", "realsense params file", "realsense_warp_data.json")
 }
 
 
@@ -303,6 +308,7 @@ bool DepthEstimator::FillPixelPatch()
 		for (int j=-nSizeHalfWindow; j<=nSizeHalfWindow; ++j)
 			normSq0 += SQUARE(*pTexel0++ = image0.image(x0.y+i, x0.x+j)-mean);
 	X0 = (const Vec3&)image0.camera.TransformPointI2C(Cast<REAL>(x0));
+	// whether texture variance is larger than threshold
 	return normSq0 > thMagnitudeSq;
 }
 
@@ -811,17 +817,6 @@ bool MVS::ExportDepthMap(const String& fileName, const DepthMap& depthMap, Depth
 	return img.Save(fileName);
 } // ExportDepthMap
 /*----------------------------------------------------------------*/
-
-//custom exporter
-bool MVS::ExportDepthMapAsPFM(const String& fileName, const DepthMap& depthMap) {
-	Image32F img(depthMap.size());
-	std::cout << depthMap.size() << std::endl;
-	for (int i = depthMap.area(); --i >= 0; ) {
-		const Depth depth = depthMap(--i);
-		img[i] = (depth > 0 ? depth: 0);
-	}
-	return img.Save(fileName);
-}
 
 // export normal map as an image
 bool MVS::ExportNormalMap(const String& fileName, const NormalMap& normalMap)
