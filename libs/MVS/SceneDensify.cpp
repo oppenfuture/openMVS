@@ -923,9 +923,6 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 // use initialization as the estimated depth-map
 bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 {
-	#define TD_VERBOSE 100
-	g_nVerbosityLevel = 10;
-
 	TD_TIMER_STARTD();
 
 	// initialize depth and normal maps
