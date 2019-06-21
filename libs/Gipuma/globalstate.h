@@ -28,6 +28,7 @@ public:
     LineState *lines;
     curandState *cs;
     AlgorithmParameters *params;
+    bool importReferenceDepth;
 
     cudaTextureObject_t imgs  [MAX_IMAGES];
     cudaArray *cuArray[MAX_IMAGES];

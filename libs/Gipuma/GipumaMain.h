@@ -19,6 +19,7 @@ bool GipumaMain(
         cv::Mat_<float> &depth_map,
         cv::Mat_<cv::Point3_<float>> &normal_map,
         float &dMin, float &dMax,
-        const char* config_filename);
+        const char* config_filename,
+        bool importReferenceDepth);
 }
 #endif // _GIPUMA_GIPUMA_MAIN_H_
