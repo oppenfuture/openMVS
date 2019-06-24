@@ -532,18 +532,19 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 	int coplanar[3];
 	const REAL prevDist(inter.dist);
 	for (const facet_t& in_facet: in_facets) {
-		ASSERT(!Tr.is_infinite(in_facet));
+	    ASSERT(!Tr.is_infinite(in_facet));
 		const int nb_coplanar(intersect(Tr.triangle(in_facet), seg, coplanar));
 		if (nb_coplanar >= 0) {
 			// skip this cell if the intersection is not in the desired direction
-			inter.dist = inter.ray.IntersectsDist(getFacetPlane(in_facet));
+			const REAL interDist = inter.ray.IntersectsDist(getFacetPlane(in_facet));
 			if ((inter.dist > prevDist) != inter.bigger)
 				continue;
 			// vertices of facet i: j = 4 * i, vertices = facet_vertex_order[j,j+1,j+2] negative orientation
 			inter.facet = in_facet;
+			inter.dist = interDist;
 			switch (nb_coplanar) {
 			case 0: {
-				// face intersection
+			    // face intersection
 				inter.type = intersection_t::FACET;
 				// now find next facets to be checked as
 				// the three faces in the neighbor cell different than the origin face
@@ -570,8 +571,12 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 				do {
 					const cell_handle_t c(ifc);
 					if (c == inter.facet.first) continue;
-					out_facets.push_back(facet_t(c, c->index(inter.v1)));
-					out_facets.push_back(facet_t(c, c->index(inter.v2)));
+					facet_t f1 = facet_t(c, c->index(inter.v1));
+					if (!Tr.is_infinite(f1))
+						out_facets.push_back(f1);
+					facet_t f2 = facet_t(c, c->index(inter.v2));
+					if (!Tr.is_infinite(f2))
+						out_facets.push_back(f2);
 				} while (++ifc != efc);
 				return true; }
 			case 2: {
