@@ -537,7 +537,7 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 		if (nb_coplanar >= 0) {
 			// skip this cell if the intersection is not in the desired direction
 			const REAL interDist(inter.ray.IntersectsDist(getFacetPlane(in_facet)));
-			if ((inter.dist > prevDist) != inter.bigger)
+			if ((interDist > prevDist) != inter.bigger)
 				continue;
 			// vertices of facet i: j = 4 * i, vertices = facet_vertex_order[j,j+1,j+2] negative orientation
 			inter.facet = in_facet;
