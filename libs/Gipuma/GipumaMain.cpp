@@ -386,7 +386,8 @@ bool runGipuma(
                      cv::Mat_<float> &depth_map,
                      cv::Mat_<cv::Point3_<float>> &normal_map,
                      float &dMin, float &dMax,
-                     AlgorithmParameters& algParams)
+                     AlgorithmParameters& algParams,
+                     bool importReferenceDepth)
 {
     size_t numImages = images.size();
     algParams.num_img_processed = std::min((int)numImages, algParams.num_img_processed);
@@ -491,12 +492,16 @@ bool runGipuma(
         //gs->lines.s = img_grayscale[0].step[0];
         gs->lines->s = cols;
         gs->lines->l = cols;
-        for (size_t c=0; c<cols; ++c) {
-            for (size_t r=0; r<rows; ++r) {
-                gs->lines->init_depth[r*cols + c] = depth_map(r, c);
-                gs->lines->norm4[r*cols + c].x = normal_map(r, c).x;
-                gs->lines->norm4[r*cols + c].y = normal_map(r, c).y;
-                gs->lines->norm4[r*cols + c].z = normal_map(r, c).z;
+        gs->importReferenceDepth = importReferenceDepth;
+
+        if (importReferenceDepth) {
+            for (size_t c=0; c<cols; ++c) {
+                for (size_t r=0; r<rows; ++r) {
+                    gs->lines->init_depth[r*cols + c] = depth_map(r, c);
+                    gs->lines->norm4[r*cols + c].x = normal_map(r, c).x;
+                    gs->lines->norm4[r*cols + c].y = normal_map(r, c).y;
+                    gs->lines->norm4[r*cols + c].z = normal_map(r, c).z;
+                }
             }
         }
     }
@@ -537,13 +542,14 @@ bool GipumaMain(
                cv::Mat_<float> &depth_map,
                cv::Mat_<cv::Point3_<float>> &normal_map,
                float &dMin, float &dMax,
-               const char* config_filename)
+               const char* config_filename,
+               bool importReferenceDepth)
 {
     AlgorithmParameters* algParams = new AlgorithmParameters;
 
     getParametersFromFile(config_filename, *algParams);
 
-    bool ret = runGipuma(prefix, images, projection_matrices, depth_map, normal_map, dMin, dMax, *algParams);
+    bool ret = runGipuma(prefix, images, projection_matrices, depth_map, normal_map, dMin, dMax, *algParams, importReferenceDepth);
 
     return ret;
 }

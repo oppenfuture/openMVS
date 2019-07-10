@@ -145,7 +145,7 @@ public:
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateNormal);
 
 	bool InitDepthMapWithoutTriangulation(DepthData& depthData, const Image8U::Size size, const bool updateFlag=false);
-  bool InitDepthMapByRealsense(DepthData& depthData, const std::string& realsense_filename, const Image &image);
+	bool InitDepthMapByRealsense(DepthData& depthData, const std::string& realsense_filename, const Image &image);
 
 protected:
 
@@ -923,17 +923,17 @@ bool DepthMapsData::InitDepthMapWithoutTriangulation(DepthData& depthData, const
 // use initialization as the estimated depth-map
 bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 {
-	TD_TIMER_STARTD();
+    TD_TIMER_STARTD();
 
-	// initialize depth and normal maps
-	DepthData& depthData(arrDepthData[idxImage]);
-	ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
-	const DepthData::ViewData& image(depthData.images.First());
-	ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
-	const Image8U::Size size(image.image.size());
-	depthData.normalMap.create(size);
-	depthData.confMap.create(size);
-	const unsigned nMaxThreads(scene.nMaxThreads);
+    // initialize depth and normal maps
+    DepthData& depthData(arrDepthData[idxImage]);
+    ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
+    const DepthData::ViewData& image(depthData.images.First());
+    ASSERT(!image.image.empty() && !depthData.images[1].image.empty());
+    const Image8U::Size size(image.image.size());
+    depthData.normalMap.create(size);
+    depthData.confMap.create(size);
+    const unsigned nMaxThreads(scene.nMaxThreads);
 
     // initialize the depth-map
     if (OPTDENSE::importReferenceDepth) {
@@ -941,19 +941,24 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
         if (OPTDENSE::updateReferenceDepthWithPoints) {
             InitDepthMapWithoutTriangulation(depthData, size, true);
         }
-        else if (depthData.depthMap.empty()) {
-            depthData.depthMap.create(size); depthData.depthMap.memset(0);
-            InitDepthMapWithoutTriangulation(depthData, size);
+        if (depthData.depthMap.empty()) {
+            std::cout << "Failed to import reference depth." << std::endl;
+            exit(1);
         }
     } else {
-        depthData.depthMap.create(size); depthData.depthMap.memset(0);
+    depthData.depthMap.create(size); depthData.depthMap.memset(0);
+    if (OPTDENSE::algorithm == 1) {
         if (OPTDENSE::nMinViewsTrustPoint < 2) {
             InitDepthMapWithoutTriangulation(depthData, size);
         } else {
-            // compute rough estimates using the sparse point-cloud
+           // compute rough estimates using the sparse point-cloud
             InitDepthMap(depthData);
         }
+    } else if(OPTDENSE::algorithm == 2) {
+        std::cout << "NoPatchMatch must offer reference depth." << std::endl;
+        exit(1);
     }
+}
 
     if (OPTDENSE::algorithm == 0) {
         if (!GipumaPatchMatch(idxImage, size, depthData))
@@ -1140,7 +1145,7 @@ bool DepthMapsData::GipumaPatchMatch(IIndex idxImage, const Image8U::Size &size,
         cv::Mat_<cv::Point3_<float>> normal_map = depthData.normalMap; // no deep copy
         gipuma::GipumaMain(path, images, projection_matrices, depthData.depthMap,
                            normal_map, depthData.dMin, depthData.dMax,
-                           OPTDENSE::paramsFile.c_str());
+                           OPTDENSE::paramsFile.c_str(), OPTDENSE::importReferenceDepth);
 
 #if 1 && TD_VERBOSE != TD_VERBOSE_OFF
         // save intermediate depth map as image
@@ -2175,8 +2180,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			if (OPTDENSE::importReferenceDepth) {
 				const IIndex idx = data.images[evtImage.idxImage];
 				DepthData& depthData(data.detphMaps.arrDepthData[idx]);
-        data.detphMaps.InitDepthMapByRealsense(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
-      }
+				data.detphMaps.InitDepthMapByRealsense(depthData, OPTDENSE::strRealsenseFileName, images[data.images[evtImage.idxImage]]);
+			}
             data.detphMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
 			data.sem.Signal();
 			if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {

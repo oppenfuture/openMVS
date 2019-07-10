@@ -860,7 +860,8 @@ __device__ FORCEINLINE void spatialPropagation_cu (
                                                     const float4 norm_before,
                                                     float *disp_now,
                                                     const float4 * __restrict__ state,
-                                                    const int point
+                                                    const int point,
+                                                    bool importReferenceDepth
                                                   )
 {
     // previous image values
@@ -879,8 +880,10 @@ __device__ FORCEINLINE void spatialPropagation_cu (
                                                 camParams,
                                                 state,
                                                 point);
-    if (cost_before < MAXCOST)
-        cost_before = fminf(MAXCOST, cost_before + depthCost(disp_before, init_depth));
+    if (cost_before < MAXCOST) {
+        float depth_cost = importReferenceDepth ? depthCost(disp_before, init_depth) : 0;
+        cost_before = fminf(MAXCOST, cost_before + depth_cost);
+    }
     if ( ISDISPDEPTHWITHINBORDERS(disp_before,camParams,REFERENCE,algParams) )
     {
         if ( cost_before < *cost_now ) {
@@ -966,7 +969,8 @@ __device__ FORCEINLINE static void planeRefinement_cu (
                                                        float4 * __restrict__ norm_now,
                                                        float * __restrict__ disp_now,
                                                        curandState *cs,
-                                                       const float4 * __restrict__ state)
+                                                       const float4 * __restrict__ state,
+                                                       bool importReferenceDepth)
 {
     float deltaN = 1.0f;
 
@@ -1008,8 +1012,9 @@ __device__ FORCEINLINE static void planeRefinement_cu (
                                             state,
                                             0);
         if (costTempL < MAXCOST) {
-            float depth = getDisparity_cu (norm_temp, norm_temp.w, p, camParams.cameras[REFERENCE] );
-            costTempL = fminf(MAXCOST, costTempL + depthCost(depth, init_depth));
+            float depth = getDisparity_cu (norm_temp, norm_temp.w, p, camParams.cameras[REFERENCE]);
+            float depth_cost = importReferenceDepth ? depthCost(depth, init_depth) : 0;
+            costTempL = fminf(MAXCOST, costTempL + depth_cost);
         }
         //if (dTemp_L==dTemp_L && dTemp_L!= 0) // XXX
         {
@@ -1042,42 +1047,42 @@ __global__ void gipuma_init_cu2(GlobalState &gs)
     int box_hrad = gs.params->box_hsize / 2;
     int box_vrad = gs.params->box_vsize / 2;
 
-    float disp_now;
-    float4 norm_now = gs.lines->norm4[center];
-
     curandState localState = gs.cs[p.y*cols+p.x];
     curand_init ( clock64(), p.y, p.x, &localState );
 
-    // Compute random normal on half hemisphere of fronto view vector
-    float mind = gs.params->min_disparity;
-    float maxd = gs.params->max_disparity;
-    float4 viewVector;
-    getViewVector_cu ( &viewVector, camera, p);
-    //printf("Random number is %f\n", random_number);
-    //return;
-    //disp_now = curand_between(&localState, mind, maxd);
-    // rndUnitVectorOnHemisphere_cu ( &norm_now, viewVector, &localState );
-    // disp_now= disparityDepthConversion_cu ( camera.f, camera.baseline, disp_now);
-    disp_now = gs.lines->init_depth[center];
-    // Save values
-    norm_now.w = getD_cu ( norm_now, p, disp_now,  camera);
-    //disp[x] = disp_now;
+    float disp_now;
+    float4 norm_now;
+
+    if (gs.importReferenceDepth) {
+        disp_now = gs.lines->init_depth[center];
+        norm_now = gs.lines->norm4[center];
+    } else {
+        float mind = gs.params->min_disparity;
+        float maxd = gs.params->max_disparity;
+        float4 viewVector;
+        getViewVector_cu(&viewVector, camera, p);
+        disp_now = curand_between(&localState, mind, maxd);
+        rndUnitVectorOnHemisphere_cu(&norm_now, viewVector, &localState);
+        disp_now = disparityDepthConversion_cu(camera.f, camera.baseline, disp_now);
+    }
+    norm_now.w = getD_cu(norm_now, p, disp_now,  camera);
     gs.lines->norm4[center] = norm_now;
 
     __shared__ T tile_leftt[1] ;
     const int2 tmp =make_int2(0,0);
-    gs.lines->c[center] = pmCostMultiview_cu<T> ( gs.imgs,
-                                                 tile_leftt,
-                                                 tmp,
-                                                 p,
-                                                 norm_now,
-                                                 box_vrad, box_hrad,
-                                                 *(gs.params),
-                                                 *(gs.cameras),
-                                                 gs.lines->norm4,
-                                                 0);
+    gs.lines->c[center] = pmCostMultiview_cu<T>(gs.imgs,
+                                                tile_leftt,
+                                                tmp,
+                                                p,
+                                                norm_now,
+                                                box_vrad, box_hrad,
+                                                *(gs.params),
+                                                *(gs.cameras),
+                                                gs.lines->norm4,
+                                                0);
     return;
 }
+
 template< typename T >
 __global__ void gipuma_initial_cost(GlobalState &gs)
 {
@@ -1373,7 +1378,8 @@ __device__ FORCEINLINE void gipuma_checkerboard_cu(GlobalState &gs, int2 p, cons
                         &norm_now,
                         &disp_now,
                         &localState,
-                        norm);
+                        norm,
+                        gs.importReferenceDepth);
 
     // Save to global memory
     c    [center] = cost_now;
@@ -1479,7 +1485,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropFar_cu(GlobalState &g
     // Right by 5
     const int right = center+5;
 
-    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
+    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point, gs.importReferenceDepth)
 
     if (p.y>4) {
         SPATIALPROPAGATION(up);
@@ -1600,7 +1606,7 @@ __device__ FORCEINLINE void gipuma_checkerboard_spatialPropClose_cu(GlobalState 
     // Right
     const int right = center+1;
 
-    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point)
+    #define SPATIALPROPAGATION(point) spatialPropagation_cu<T> (init_depth[center], imgs, tile_left, tile_offset, p, box_hrad, box_vrad, algParams, camParams, &cost_now, &norm_now, norm[point], &disp_now, norm, point, gs.importReferenceDepth)
 
     if (p.y>0) {
         SPATIALPROPAGATION(up);
@@ -1737,7 +1743,8 @@ __device__ FORCEINLINE void gipuma_checkerboard_planeRefinement_cu(GlobalState &
                         &norm_now,
                         &disp_now,
                         &localState,
-                        norm);
+                        norm,
+                        gs.importReferenceDepth);
 
     // Save to global memory
     c    [center] = cost_now;
