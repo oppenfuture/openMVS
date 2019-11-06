@@ -3,7 +3,7 @@ Dependencies
 ------------
 
 *OpenMVS* relies on a number of open source libraries, some of which are optional. For details on customizing the build process, see the compilation instructions.
-* [Eigen](http://eigen.tuxfamily.org) version 3.2 or higher
+* [Eigen](http://eigen.tuxfamily.org) version 3.2 or higher, 3.3 not supported
 * [OpenCV](http://opencv.org) version 2.4 or higher
 * [Ceres](http://ceres-solver.org) version 1.10 or higher
 * [CGAL](http://www.cgal.org) version 4.2 or higher
