@@ -28,6 +28,7 @@ SET(COTIRE_INTDIR "cotire")
 
 # Define helper functions and macros.
 cmake_policy(SET CMP0011 OLD)
+cmake_policy(SET CMP0074 NEW)
 INCLUDE(build/Utils.cmake)
 if(ENABLE_PRECOMPILED_HEADERS)
 	INCLUDE(build/Cotire.cmake)
