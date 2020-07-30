@@ -470,8 +470,8 @@ bool runGipuma(
         double minVal, maxVal;
         minMaxLoc(disp[i], &minVal, &maxVal);
     }
-    dMin = algParams.depthMin;
-    dMax = algParams.depthMax;
+    dMin = algParams.depthMin * 0.9f;
+    dMax = algParams.depthMax * 1.1f;
 
     // run gpu run
     // Init parameters
